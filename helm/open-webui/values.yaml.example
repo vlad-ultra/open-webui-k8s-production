@@ -1,0 +1,208 @@
+# Example values file for Open WebUI
+# Copy this file to values.yaml.local and fill in your actual secrets
+# values.yaml.local is gitignored and will not be committed to the repository
+
+# Domain and namespace configuration
+domain: ai.svdevops.tech
+namespace: ai
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+  hosts:
+    - host: ai.svdevops.tech
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: open-webui-tls
+      hosts:
+        - ai.svdevops.tech
+
+# Image configuration
+image:
+  repository: ghcr.io/open-webui/open-webui
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Replica configuration
+replicaCount: 2
+
+# Resource limits and requests
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "250m"
+  limits:
+    memory: "2Gi"
+    cpu: "1000m"
+
+# Health checks
+livenessProbe:
+  httpGet:
+    path: /api/health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /api/health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+startupProbe:
+  httpGet:
+    path: /api/health
+    port: http
+  initialDelaySeconds: 0
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 30
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+  protocol: TCP
+
+# Persistent Volume Configuration
+persistence:
+  enabled: true
+  storageClass: standard-rwo
+  accessMode: ReadWriteOnce
+  size: 10Gi
+  annotations: {}
+
+# Environment variables for OpenRouter API
+env:
+  # OpenRouter API Configuration (OpenAI-compatible API)
+  # OpenRouter provides 344+ AI models through a unified OpenAI-compatible API
+  OPENAI__API_KEY: ""  # OpenRouter API key (set via Secret)
+  OPENAI__API_BASE_URL: "https://openrouter.ai/api/v1"  # OpenRouter API endpoint
+  OPENAI__EMBEDDING_MODEL: "text-embedding-3-small"
+  
+  # Application Configuration
+  WEBUI_NAME: "Open WebUI"
+  WEBUI_URL: "https://ai.svdevops.tech"
+  WEBUI_SECRET_KEY: ""  # Should be set via Secret
+  DEFAULT_USER_ROLE: "user"
+  
+  # Database Configuration
+  DATA_DIR: "/app/backend/data"
+  
+  # Security
+  ENABLE_SIGNUP: "true"
+  ENABLE_SIGNUP_PROVIDER_AUTH: "false"
+  
+  # Monitoring
+  ENABLE_METRICS: "true"
+  METRICS_PORT: "9090"
+
+# Secrets configuration
+# ⚠️ IMPORTANT: Fill in your actual secrets in values.yaml.local
+# NEVER commit real secrets to Git!
+secrets:
+  enabled: true
+  openrouterApiKey: ""  # OpenRouter API key - Set via environment variable or values.yaml.local
+  webuiSecretKey: ""  # Auto-generate with: openssl rand -hex 32
+
+# ServiceMonitor for Prometheus
+# ⚠️ Requires installed Prometheus Operator (CRD: monitoring.coreos.com/v1)
+# Disabled by default. Enable after installing Prometheus Operator
+serviceMonitor:
+  enabled: false  # Set to true after installing Prometheus Operator
+  interval: 30s
+  scrapeTimeout: 10s
+  path: /metrics
+  port: metrics
+
+# NetworkPolicy
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            name: monitoring
+      ports:
+      - protocol: TCP
+        port: 9090
+    - from:
+      - namespaceSelector: {}
+      ports:
+      - protocol: TCP
+        port: 8080
+  egress:
+    - to:
+      - namespaceSelector: {}
+      ports:
+      - protocol: TCP
+        port: 443
+      - protocol: TCP
+        port: 80
+      - protocol: TCP
+        port: 53
+      - protocol: UDP
+        port: 53
+
+# Pod annotations
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9090"
+  prometheus.io/path: "/metrics"
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# Node selector and tolerations
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Horizontal Pod Autoscaler
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# ServiceAccount
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Image pull secrets
+imagePullSecrets: []
+

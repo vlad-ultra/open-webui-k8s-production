@@ -1,0 +1,28 @@
+# Install cert-manager for Let's Encrypt TLS certificates
+# This file installs cert-manager using the official Helm chart
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cert-manager
+  namespace: cert-manager
+---
+# Note: In production, use the official cert-manager installation:
+# kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+#
+# Or using Helm:
+# helm repo add jetstack https://charts.jetstack.io
+# helm repo update
+# helm install cert-manager jetstack/cert-manager \
+#   --namespace cert-manager \
+#   --create-namespace \
+#   --set installCRDs=true
+
+
+
+

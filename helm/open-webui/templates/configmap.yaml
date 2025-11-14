@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "open-webui.fullname" . }}-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "open-webui.labels" . | nindent 4 }}
+data:
+  # Application Configuration
+  WEBUI_NAME: {{ .Values.env.WEBUI_NAME | quote }}
+  WEBUI_URL: {{ .Values.env.WEBUI_URL | quote }}
+  DEFAULT_USER_ROLE: {{ .Values.env.DEFAULT_USER_ROLE | quote }}
+  DATA_DIR: {{ .Values.env.DATA_DIR | quote }}
+  ENABLE_SIGNUP: {{ .Values.env.ENABLE_SIGNUP | quote }}
+  ENABLE_SIGNUP_PROVIDER_AUTH: {{ .Values.env.ENABLE_SIGNUP_PROVIDER_AUTH | quote }}
+  ENABLE_METRICS: {{ .Values.env.ENABLE_METRICS | quote }}
+  METRICS_PORT: {{ .Values.env.METRICS_PORT | quote }}
+  
+  # OpenRouter API Configuration (OpenAI-compatible API)
+  {{- if .Values.env.OPENAI__EMBEDDING_MODEL }}
+  OPENAI__EMBEDDING_MODEL: {{ .Values.env.OPENAI__EMBEDDING_MODEL | quote }}
+  {{- end }}
+  {{- if .Values.env.OPENAI__API_BASE_URL }}
+  OPENAI__API_BASE_URL: {{ .Values.env.OPENAI__API_BASE_URL | quote }}
+  {{- end }}
+  {{- if .Values.env.OPENAI__API_BASE_URL }}
+  OPENAI_API_BASE_URL: {{ .Values.env.OPENAI__API_BASE_URL | quote }}
+  {{- end }}
+
+

@@ -1,0 +1,157 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "open-webui.fullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "open-webui.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "open-webui.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "open-webui.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "open-webui.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+      - name: {{ .Chart.Name }}
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 12 }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.service.targetPort }}
+          protocol: TCP
+        - name: metrics
+          containerPort: {{ .Values.env.METRICS_PORT | int }}
+          protocol: TCP
+        env:
+        # Application Configuration
+        - name: DATA_DIR
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "open-webui.fullname" . }}-config
+              key: DATA_DIR
+        - name: WEBUI_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "open-webui.fullname" . }}-config
+              key: WEBUI_NAME
+        - name: WEBUI_URL
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "open-webui.fullname" . }}-config
+              key: WEBUI_URL
+        - name: DEFAULT_USER_ROLE
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "open-webui.fullname" . }}-config
+              key: DEFAULT_USER_ROLE
+        - name: ENABLE_SIGNUP
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "open-webui.fullname" . }}-config
+              key: ENABLE_SIGNUP
+        - name: ENABLE_SIGNUP_PROVIDER_AUTH
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "open-webui.fullname" . }}-config
+              key: ENABLE_SIGNUP_PROVIDER_AUTH
+        - name: ENABLE_METRICS
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "open-webui.fullname" . }}-config
+              key: ENABLE_METRICS
+        - name: METRICS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "open-webui.fullname" . }}-config
+              key: METRICS_PORT
+        # OpenRouter API Configuration (OpenAI-compatible API)
+        {{- if .Values.env.OPENAI__EMBEDDING_MODEL }}
+        - name: OPENAI__EMBEDDING_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "open-webui.fullname" . }}-config
+              key: OPENAI__EMBEDDING_MODEL
+        {{- end }}
+        {{- if .Values.env.OPENAI__API_BASE_URL }}
+        - name: OPENAI__API_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "open-webui.fullname" . }}-config
+              key: OPENAI__API_BASE_URL
+        {{- end }}
+        {{- if .Values.env.OPENAI__API_BASE_URL }}
+        - name: OPENAI_API_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "open-webui.fullname" . }}-config
+              key: OPENAI_API_BASE_URL
+        {{- end }}
+        # Secrets (API Keys)
+        {{- if and .Values.secrets.enabled .Values.secrets.openrouterApiKey }}
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "open-webui.fullname" . }}-secrets
+              key: OPENAI_API_KEY
+        - name: OPENAI__API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "open-webui.fullname" . }}-secrets
+              key: OPENAI__API_KEY
+        {{- end }}
+        {{- if and .Values.secrets.enabled .Values.secrets.webuiSecretKey }}
+        - name: WEBUI_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "open-webui.fullname" . }}-secrets
+              key: WEBUI_SECRET_KEY
+        {{- end }}
+        {{- if .Values.persistence.enabled }}
+        volumeMounts:
+        - name: data
+          mountPath: {{ .Values.env.DATA_DIR }}
+        {{- end }}
+        livenessProbe:
+          {{- toYaml .Values.livenessProbe | nindent 10 }}
+        readinessProbe:
+          {{- toYaml .Values.readinessProbe | nindent 10 }}
+        startupProbe:
+          {{- toYaml .Values.startupProbe | nindent 10 }}
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+      {{- if .Values.persistence.enabled }}
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: {{ include "open-webui.fullname" . }}-pvc
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+

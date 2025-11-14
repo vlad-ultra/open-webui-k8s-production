@@ -1,0 +1,5 @@
+project_id   = "your-project-id"
+region       = "europe-west1"
+zone         = "europe-west1-b"
+cluster_name = "open-webui-cluster"
+node_count   = 2

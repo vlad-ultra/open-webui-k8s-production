@@ -1,0 +1,31 @@
+# Install NGINX Ingress Controller for GKE
+# This file provides instructions for installing NGINX Ingress on GKE
+
+# Option 1: Using Helm (Recommended)
+# helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+# helm repo update
+# helm install ingress-nginx ingress-nginx/ingress-nginx \
+#   --namespace ingress-nginx \
+#   --create-namespace \
+#   --set controller.service.type=LoadBalancer \
+#   --set controller.service.annotations."cloud\.google\.com/load-balancer-type"="External"
+
+# Option 2: Using GKE Ingress (GCE Load Balancer)
+# GKE has built-in support for Ingress using Google Cloud Load Balancer
+# Simply create an Ingress resource with ingressClassName: gce
+# For this project, we use NGINX Ingress for more control
+
+# Option 3: Using GKE Ingress Controller
+# kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.1/deploy/static/provider/cloud/deploy.yaml
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-nginx
+---
+# Note: For GKE, you may want to use Google Cloud Load Balancer instead
+# Update values.yaml to use ingressClassName: gce for GKE native ingress
+
+
+
+

@@ -1,0 +1,15 @@
+apiVersion: v2
+name: open-webui
+description: A Helm chart for Open WebUI - User-friendly LLM chatting UI
+type: application
+version: 1.0.0
+appVersion: "latest"
+keywords:
+  - open-webui
+  - llm
+  - chat
+  - ai
+home: https://github.com/open-webui/open-webui
+sources:
+  - https://github.com/open-webui/open-webui
+

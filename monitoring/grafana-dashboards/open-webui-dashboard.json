@@ -1,0 +1,92 @@
+{
+  "dashboard": {
+    "title": "Open WebUI Monitoring",
+    "tags": ["open-webui", "ai", "llm"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Request Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(http_requests_total[5m])",
+            "legendFormat": "{{method}} {{status}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Response Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "p95"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "p99"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "CPU Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(container_cpu_usage_seconds_total{namespace=\"ai\",pod=~\"open-webui.*\"}[5m])",
+            "legendFormat": "{{pod}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "Memory Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "container_memory_usage_bytes{namespace=\"ai\",pod=~\"open-webui.*\"}",
+            "legendFormat": "{{pod}}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "id": 5,
+        "title": "Pod Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "kube_pod_status_phase{namespace=\"ai\",pod=~\"open-webui.*\"}",
+            "legendFormat": "{{phase}}"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 16}
+      },
+      {
+        "id": 6,
+        "title": "Active Connections",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(up{namespace=\"ai\",pod=~\"open-webui.*\"})",
+            "legendFormat": "Pods"
+          }
+        ],
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 16}
+      }
+    ]
+  }
+}
+
+
+
+
