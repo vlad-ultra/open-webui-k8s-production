@@ -2,7 +2,7 @@
 # This is a YAML-formatted file.
 
 # Domain and namespace configuration
-domain: ai.svdevops.tech
+domain: ai-k8s.svdevops.tech
 namespace: ai
 ingress:
   enabled: true
@@ -12,14 +12,14 @@ ingress:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
   hosts:
-    - host: ai.svdevops.tech
+    - host: ai-k8s.svdevops.tech
       paths:
         - path: /
           pathType: Prefix
   tls:
     - secretName: open-webui-tls
       hosts:
-        - ai.svdevops.tech
+        - ai-k8s.svdevops.tech
 
 # Image configuration
 image:
@@ -96,7 +96,7 @@ env:
   
   # Application Configuration
   WEBUI_NAME: "Open WebUI"
-  WEBUI_URL: "https://ai.svdevops.tech"
+  WEBUI_URL: "https://ai-k8s.svdevops.tech"
   WEBUI_SECRET_KEY: ""  # Should be set via Secret
   DEFAULT_USER_ROLE: "user"
   

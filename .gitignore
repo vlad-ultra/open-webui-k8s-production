@@ -28,6 +28,7 @@ kubeconfig
 *.pem
 *.crt
 gcp-sa-key.json
+gcp-sa-key-*.json
 
 # IDE
 .vscode/
@@ -60,3 +61,11 @@ values.yaml.local
 # Backup
 *.bak
 *.backup
+backups/
+SETUP.md
+
+# SSL certificates (self-signed) - saved for reuse
+ssl-certs/
+*.csr
+backup/
+certs/

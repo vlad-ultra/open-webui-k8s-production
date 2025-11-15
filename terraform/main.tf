@@ -49,7 +49,7 @@ resource "google_container_node_pool" "primary" {
     oauth_scopes = [
       "https://www.googleapis.com/auth/logging.write",
       "https://www.googleapis.com/auth/monitoring",
-      "https://www.googleapis.com/auth/devstorage.read_only",
+      "https://www.googleapis.com/auth/devstorage.read_only",  # Using Secret with GCP SA for GCS access (no need for read_write on nodes)
       "https://www.googleapis.com/auth/compute",
     ]
   }
@@ -65,8 +65,14 @@ resource "google_compute_address" "ingress_ip" {
 
   # Protection from deletion - IP will persist even after terraform destroy
   # This is critical for GitHub Actions to keep IP unchanged on cluster recreation
-  # If you need to delete the IP, comment out this block first
+  # To destroy: use ./scripts/destroy-infra.sh or terraform destroy with -target (excluding IP)
   lifecycle {
     prevent_destroy = true
+    # Ignore changes to labels to prevent unnecessary updates
+    ignore_changes = [labels]
   }
 }
+
+# Note: Application deployment is now separate from infrastructure deployment
+# After terraform apply, run: ./scripts/deploy-to-k8s.sh
+# This separation allows for independent infrastructure and application deployments

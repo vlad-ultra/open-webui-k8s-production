@@ -1,0 +1,192 @@
+name: Manual Deploy (No Destroy)
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - deploy
+          - destroy
+          - backup-only
+        default: 'deploy'
+
+env:
+  # Required secrets - only 2 secrets needed!
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+  # Optional: OpenRouter API key for 344+ AI models
+  OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+  # Default values (no secrets needed)
+  GCP_REGION: europe-west1
+  GCP_ZONE: europe-west1-b
+  CLUSTER_NAME: open-webui-cluster
+  NAMESPACE: ai
+  BACKUP_BUCKET: open-webui-backups
+
+jobs:
+  backup:
+    name: Backup Database
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action != 'deploy'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure kubectl
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} \
+            --zone ${{ env.GCP_ZONE }} \
+            --project ${{ env.GCP_PROJECT_ID }}
+
+      - name: Backup database
+        run: |
+          mkdir -p backups
+          POD_NAME=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app.kubernetes.io/name=open-webui -o jsonpath='{.items[0].metadata.name}')
+          
+          if [ -n "$POD_NAME" ]; then
+            echo "Backing up database..."
+            kubectl cp ${{ env.NAMESPACE }}/$POD_NAME:/app/backend/data/webui.db backups/webui_backup_$(date +%Y%m%d_%H%M%S).db
+            
+            # Upload to GCS
+            if [ -n "${{ env.BACKUP_BUCKET }}" ]; then
+              gsutil mb -p ${{ env.GCP_PROJECT_ID }} -l ${{ env.GCP_REGION }} gs://${{ env.BACKUP_BUCKET }} 2>/dev/null || true
+              gsutil cp backups/webui_backup_*.db gs://${{ env.BACKUP_BUCKET }}/latest.db
+              gsutil cp backups/webui_backup_*.db gs://${{ env.BACKUP_BUCKET }}/backups/webui_backup_$(date +%Y%m%d_%H%M%S).db
+              echo " Backup uploaded to GCS"
+            fi
+          fi
+
+  destroy:
+    name: Destroy Infrastructure
+    runs-on: ubuntu-latest
+    needs: backup
+    if: github.event.inputs.action == 'destroy'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Destroy
+        working-directory: terraform
+        run: terraform destroy -auto-approve
+        env:
+          TF_VAR_project_id: ${{ env.GCP_PROJECT_ID }}
+          TF_VAR_region: ${{ env.GCP_REGION }}
+          TF_VAR_zone: ${{ env.GCP_ZONE }}
+
+  deploy:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'deploy'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: |
+          terraform init
+          terraform apply -auto-approve
+        env:
+          TF_VAR_project_id: ${{ env.GCP_PROJECT_ID }}
+          TF_VAR_region: ${{ env.GCP_REGION }}
+          TF_VAR_zone: ${{ env.GCP_ZONE }}
+
+      - name: Deploy Application
+        run: |
+          gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} \
+            --zone ${{ env.GCP_ZONE }} \
+            --project ${{ env.GCP_PROJECT_ID }}
+          
+          # Install NGINX Ingress
+          INGRESS_IP=$(cd terraform && terraform output -raw ingress_ip)
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm repo update
+          helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+            --namespace ingress-nginx \
+            --create-namespace \
+            --set controller.service.type=LoadBalancer \
+            --set controller.service.annotations."cloud\.google\.com/load-balancer-type"="External" \
+            --set controller.service.loadBalancerIP="$INGRESS_IP" \
+            --wait
+          
+          # Install cert-manager
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=cert-manager -n cert-manager --timeout=300s
+          kubectl apply -f bootstrap/cluster-issuer.yaml
+          
+          # Prepare Helm values
+          # Always create from example (never use existing local file)
+          # This ensures Git-based deployment uses only files from repository
+          echo "Creating values.yaml.local from template (Git-based)..."
+          rm -f ./helm/open-webui/values.yaml.local
+          cp ./helm/open-webui/values.yaml.example ./helm/open-webui/values.yaml.local
+          
+          # Generate WEBUI_SECRET_KEY
+          WEBUI_SECRET_KEY=$(openssl rand -hex 32)
+          
+          # Update secrets in values.yaml.local
+          if [ -n "${{ env.OPENROUTER_API_KEY }}" ]; then
+            echo " Using OpenRouter API key from GitHub Secrets"
+            API_KEY_ESCAPED=$(echo "${{ env.OPENROUTER_API_KEY }}" | sed 's/[[\.*^$()+?{|]/\\&/g')
+            sed -i.bak "s|openrouterApiKey: \"\"|openrouterApiKey: \"${API_KEY_ESCAPED}\"|g" ./helm/open-webui/values.yaml.local
+          else
+            echo "OpenRouter API key not provided"
+          fi
+          
+          sed -i.bak "s|webuiSecretKey: \"\"|webuiSecretKey: \"${WEBUI_SECRET_KEY}\"|g" ./helm/open-webui/values.yaml.local
+          
+          rm -f ./helm/open-webui/values.yaml.local.bak
+          
+          # Deploy Open WebUI
+          helm upgrade --install open-webui ./helm/open-webui \
+            -n ${{ env.NAMESPACE }} \
+            -f ./helm/open-webui/values.yaml.local \
+            --create-namespace \
+            --wait
+          
+          # Restore database
+          mkdir -p backups
+          gsutil cp gs://${{ env.BACKUP_BUCKET }}/latest.db backups/webui_backup_latest.db 2>/dev/null && {
+            echo "Restoring database..."
+            ./backup/restore-database.sh backups/webui_backup_latest.db || echo "⚠️ Restore failed, continuing..."
+          } || echo " No backup found, skipping restore"
+

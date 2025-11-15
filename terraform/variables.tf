@@ -26,3 +26,17 @@ variable "node_count" {
   type        = number
   default     = 2
 }
+
+variable "openrouter_api_key" {
+  description = "OpenRouter API key for 344+ AI models (optional)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "gcp_sa_key" {
+  description = "GCP Service Account JSON key for initContainer to access GCS (optional, can be set via environment)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}

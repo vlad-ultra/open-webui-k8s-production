@@ -3,24 +3,27 @@
 # values.yaml.local is gitignored and will not be committed to the repository
 
 # Domain and namespace configuration
-domain: ai.svdevops.tech
+domain: ai-k8s.svdevops.tech
 namespace: ai
 ingress:
   enabled: true
   className: nginx
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Option 1: Use cert-manager for Let's Encrypt (after rate limit resets)
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Option 2: Use self-signed certificate (created by deploy script)
+    # No annotation needed - secret will be used directly
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
   hosts:
-    - host: ai.svdevops.tech
+    - host: ai-k8s.svdevops.tech
       paths:
         - path: /
           pathType: Prefix
   tls:
     - secretName: open-webui-tls
       hosts:
-        - ai.svdevops.tech
+        - ai-k8s.svdevops.tech
 
 # Image configuration
 image:
@@ -29,7 +32,7 @@ image:
   pullPolicy: IfNotPresent
 
 # Replica configuration
-replicaCount: 2
+replicaCount: 1
 
 # Resource limits and requests
 resources:
@@ -93,7 +96,7 @@ env:
   
   # Application Configuration
   WEBUI_NAME: "Open WebUI"
-  WEBUI_URL: "https://ai.svdevops.tech"
+  WEBUI_URL: "https://ai-k8s.svdevops.tech"
   WEBUI_SECRET_KEY: ""  # Should be set via Secret
   DEFAULT_USER_ROLE: "user"
   
@@ -186,11 +189,20 @@ affinity: {}
 
 # Horizontal Pod Autoscaler
 autoscaling:
-  enabled: true
-  minReplicas: 2
+  enabled: false  # Disabled - using fixed replicaCount: 1 (RWO storage requires single pod)
+  minReplicas: 1
   maxReplicas: 5
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
+
+# Backup and Restore Configuration
+backup:
+  enabled: true
+  restoreOnDeploy: true  # Automatically restore database from backup on deployment
+  gcsBucket: "open-webui-backups"  # GCS bucket name for backups
+  # Optional: GCP Service Account secret name for accessing GCS
+  # If not set, will use default GCP credentials (Workload Identity or node service account)
+  gcpServiceAccount: ""  # e.g., "gcp-sa-key" - secret with GCP service account JSON key
 
 # Pod Disruption Budget
 podDisruptionBudget:

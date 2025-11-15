@@ -26,6 +26,97 @@ spec:
       {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if and .Values.persistence.enabled .Values.backup.enabled .Values.backup.restoreOnDeploy }}
+      initContainers:
+      - name: restore-database
+        image: google/cloud-sdk:alpine
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          # Install sqlite3 for database validation
+          apk add --no-cache sqlite3 >/dev/null 2>&1 || true
+          
+          DATA_DIR="{{ .Values.env.DATA_DIR }}"
+          DB_FILE="${DATA_DIR}/webui.db"
+          BACKUP_BUCKET="{{ .Values.backup.gcsBucket }}"
+          BACKUP_FILE="gs://${BACKUP_BUCKET}/latest.db"
+          
+          echo "🔍 Checking for existing database..."
+          if [ -f "${DB_FILE}" ]; then
+            DB_SIZE=$(stat -f%z "${DB_FILE}" 2>/dev/null || stat -c%s "${DB_FILE}" 2>/dev/null || echo "0")
+            if [ "${DB_SIZE}" -gt 0 ]; then
+              echo "   Database file exists (${DB_SIZE} bytes), checking if it has users..."
+              # Check if database has users using sqlite3
+              if command -v sqlite3 >/dev/null 2>&1; then
+                USER_COUNT=$(sqlite3 "${DB_FILE}" "SELECT COUNT(*) FROM user;" 2>/dev/null || echo "0")
+                if [ "${USER_COUNT}" -gt 0 ]; then
+                  echo "✅ Database already exists with ${USER_COUNT} users, skipping restore"
+                  exit 0
+                else
+                  echo "   Database exists but has no users (${USER_COUNT}), will restore from backup"
+                fi
+              else
+                # If sqlite3 not available, check file size (if very small, likely empty)
+                if [ "${DB_SIZE}" -lt 10000 ]; then
+                  echo "   Database file is very small (${DB_SIZE} bytes), will restore from backup"
+                else
+                  echo "✅ Database already exists (${DB_SIZE} bytes), skipping restore"
+                  exit 0
+                fi
+              fi
+            fi
+          fi
+          
+          echo "📥 Database not found or empty, attempting to restore from backup..."
+          echo "   Backup location: ${BACKUP_FILE}"
+          
+          if gsutil -q stat "${BACKUP_FILE}" 2>/dev/null; then
+            echo "   ✅ Backup found, downloading..."
+            gsutil cp "${BACKUP_FILE}" "${DB_FILE}.backup" || {
+              echo "   ❌ Failed to download backup"
+              exit 1
+            }
+            
+            echo "   📦 Restoring database..."
+            cp "${DB_FILE}.backup" "${DB_FILE}" || {
+              echo "   ❌ Failed to restore database"
+              exit 1
+            }
+            
+            # Set proper permissions
+            chmod 666 "${DB_FILE}" || true
+            
+            echo "   ✅ Database restored successfully!"
+            rm -f "${DB_FILE}.backup"
+          else
+            echo "   ⚠️  No backup found at ${BACKUP_FILE}, starting with fresh database"
+            echo "   Creating empty database file..."
+            touch "${DB_FILE}"
+            chmod 666 "${DB_FILE}" || true
+          fi
+        volumeMounts:
+        - name: data
+          mountPath: {{ .Values.env.DATA_DIR }}
+        {{- if .Values.backup.gcpServiceAccount }}
+        - name: gcp-key
+          mountPath: /var/secrets/google
+          readOnly: true
+        {{- end }}
+        {{- if .Values.backup.gcpServiceAccount }}
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /var/secrets/google/key.json
+        {{- end }}
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      {{- end }}
       containers:
       - name: {{ .Chart.Name }}
         securityContext:
@@ -141,6 +232,11 @@ spec:
       - name: data
         persistentVolumeClaim:
           claimName: {{ include "open-webui.fullname" . }}-pvc
+      {{- if and .Values.backup.enabled .Values.backup.restoreOnDeploy .Values.backup.gcpServiceAccount }}
+      - name: gcp-key
+        secret:
+          secretName: {{ .Values.backup.gcpServiceAccount }}
+      {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
