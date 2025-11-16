@@ -386,18 +386,14 @@ PATCH
 fi
 echo ""
 
-# Step 12: Ensure only 1 replica and no HPA (do this quickly, don't wait)
-echo "Step 12: Ensuring single pod configuration..."
-echo "   Checking for HPA..."
+# Step 12: Ensure HPA is disabled (if needed)
+echo "Step 12: Checking HPA configuration..."
 if kubectl get hpa open-webui -n "${NAMESPACE}" 2>/dev/null; then
-    echo "   Deleting HPA (autoscaling disabled)..."
-    kubectl delete hpa open-webui -n "${NAMESPACE}" 2>/dev/null || true
+    echo "   HPA found, checking if it should be disabled..."
+    # HPA can be left enabled if configured in values.yaml
 else
-    echo "   HPA not found (OK)"
+    echo "   HPA not found (OK, using fixed replica count from values.yaml)"
 fi
-echo "   Setting deployment to 1 replica..."
-kubectl scale deployment open-webui -n "${NAMESPACE}" --replicas=1 2>/dev/null || echo "   (Deployment may not be ready yet, will be set on next check)"
-echo "    Single pod configuration ensured"
 echo ""
 
 # Step 11: Check pod status (non-blocking)

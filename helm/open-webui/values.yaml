@@ -28,9 +28,8 @@ image:
   pullPolicy: IfNotPresent
 
 # Replica configuration
-# ⚠️ IMPORTANT: When using PVC with ReadWriteOnce (RWO), only 1 replica can be used
-# If multiple replicas are needed, use ReadWriteMany (RWX) storage class or StatefulSet
-replicaCount: 1
+# Using ReadWriteMany (RWX) storage to support multiple replicas
+replicaCount: 3
 
 # Resource limits and requests (optimized based on real-world usage)
 # Real usage: CPU: 6m, Memory: 618Mi
@@ -81,8 +80,8 @@ service:
 # Persistent Volume Configuration
 persistence:
   enabled: true
-  storageClass: standard-rwo
-  accessMode: ReadWriteOnce
+  storageClass: ""  # Use default storage class that supports RWX, or set to specific RWX storage class
+  accessMode: ReadWriteMany  # Changed to RWX to support multiple replicas
   size: 10Gi
   annotations: {}
 
@@ -189,12 +188,11 @@ tolerations: []
 affinity: {}
 
 # Horizontal Pod Autoscaler
-# ⚠️ IMPORTANT: Disabled because we use ReadWriteOnce (RWO) storage which only supports 1 pod
-# If multiple replicas are needed, use ReadWriteMany (RWX) storage class or StatefulSet
+# Can be enabled if needed for auto-scaling based on metrics
 autoscaling:
   enabled: false
-  minReplicas: 1
-  maxReplicas: 5
+  minReplicas: 3
+  maxReplicas: 10
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
 

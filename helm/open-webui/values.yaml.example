@@ -32,7 +32,8 @@ image:
   pullPolicy: IfNotPresent
 
 # Replica configuration
-replicaCount: 1
+# Using ReadWriteMany (RWX) storage to support multiple replicas
+replicaCount: 3
 
 # Resource limits and requests
 resources:
@@ -81,8 +82,8 @@ service:
 # Persistent Volume Configuration
 persistence:
   enabled: true
-  storageClass: standard-rwo
-  accessMode: ReadWriteOnce
+  storageClass: ""  # Use default storage class that supports RWX, or set to specific RWX storage class
+  accessMode: ReadWriteMany  # Changed to RWX to support multiple replicas
   size: 10Gi
   annotations: {}
 
@@ -189,9 +190,9 @@ affinity: {}
 
 # Horizontal Pod Autoscaler
 autoscaling:
-  enabled: false  # Disabled - using fixed replicaCount: 1 (RWO storage requires single pod)
-  minReplicas: 1
-  maxReplicas: 5
+  enabled: false  # Can be enabled if needed for auto-scaling based on metrics
+  minReplicas: 3
+  maxReplicas: 10
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
 
