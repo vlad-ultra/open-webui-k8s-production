@@ -26,8 +26,8 @@ env:
   DOMAIN: ai-k8s.svdevops.tech
 
 jobs:
-  create-infrastructure k8s in Google Cloud:
-    name: Create Infrastructure
+  create-infrastructure:
+    name: Create Infrastructure k8s in Google Cloud
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
