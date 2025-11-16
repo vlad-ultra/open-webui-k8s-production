@@ -1,5 +1,9 @@
 name: Destroy Infrastructure
 
+concurrency:
+  group: destroy-workflow
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:  # Manual trigger only
     inputs:
@@ -197,6 +201,18 @@ jobs:
           TF_VAR_region: ${{ env.GCP_REGION }}
           TF_VAR_zone: ${{ env.GCP_ZONE }}
           TF_VAR_cluster_name: ${{ env.CLUSTER_NAME }}
+
+      - name: Ensure deletion_protection is disabled on cluster
+        working-directory: terraform
+        run: |
+          echo "🔧 Ensuring deletion_protection=false on GKE cluster before destroy..."
+          terraform apply -auto-approve -no-color -input=false -target=google_container_cluster.cluster
+        env:
+          TF_VAR_project_id: ${{ env.GCP_PROJECT_ID }}
+          TF_VAR_region: ${{ env.GCP_REGION }}
+          TF_VAR_zone: ${{ env.GCP_ZONE }}
+          TF_VAR_cluster_name: ${{ env.CLUSTER_NAME }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
 
       - name: Terraform destroy (preserve IP)
         if: ${{ github.event.inputs.preserve_ip == 'true' }}
