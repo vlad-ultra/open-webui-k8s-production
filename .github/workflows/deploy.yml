@@ -26,10 +26,10 @@ env:
   DOMAIN: ai-k8s.svdevops.tech
 
 jobs:
-  deploy:
-    name: Deploy Infrastructure and Application
+  create-infrastructure k8s in Google Cloud:
+    name: Create Infrastructure
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -60,16 +60,6 @@ jobs:
         with:
           terraform_version: 1.5.0
 
-      - name: Set up Helm
-        uses: azure/setup-helm@v3
-        with:
-          version: '3.12.0'
-
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v3
-        env:
-          USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
-
       - name: Deploy Infrastructure
         run: |
           chmod +x ./scripts/deploy-infra.sh
@@ -84,6 +74,36 @@ jobs:
           ./scripts/deploy-infra.sh
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+
+  deploy-app-to-kubernetes:
+    name: Deploy app To Kubernetes
+    runs-on: ubuntu-latest
+    needs: create-infrastructure
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: gke-gcloud-auth-plugin
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: '3.12.0'
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        env:
+          USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
 
       - name: Deploy Application to Kubernetes
         run: |
@@ -113,6 +133,9 @@ jobs:
           kubectl get ingress -n ${{ env.NAMESPACE }}
           echo ""
           echo " Application URL: https://${{ env.DOMAIN }}"
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+          USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
       
       - name: Diagnose pod if not Ready
         run: |
@@ -136,3 +159,6 @@ jobs:
           kubectl get events -n "${NS}" --sort-by=.lastTimestamp | tail -n 50 || true
           # Surface failure to make it visible in CI
           exit 1
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+          USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
