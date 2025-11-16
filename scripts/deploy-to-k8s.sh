@@ -104,31 +104,80 @@ helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx 2>/dev/nu
 echo "   Updating Helm repositories..."
 helm repo update
 
-# Check for pending Helm operations and handle them
-echo "   Checking for pending Helm operations..."
-if helm list -n ingress-nginx 2>/dev/null | grep -q "ingress-nginx"; then
-    RELEASE_STATUS=$(helm status ingress-nginx -n ingress-nginx -o json 2>/dev/null | grep -o '"status":"[^"]*"' | cut -d'"' -f4 || echo "")
-    if [ "$RELEASE_STATUS" = "pending-upgrade" ] || [ "$RELEASE_STATUS" = "pending-install" ] || [ "$RELEASE_STATUS" = "pending-rollback" ]; then
-        echo "   ⚠️  Pending Helm operation detected (status: ${RELEASE_STATUS})"
-        echo "   Attempting to rollback to clear pending state..."
-        helm rollback ingress-nginx -n ingress-nginx 2>/dev/null || {
-            echo "   Rollback failed or not needed, trying to continue with --force..."
-        }
-        # Wait a bit for rollback to complete
-        sleep 5
+# Function to clear stuck Helm operations
+clear_helm_pending() {
+    local RELEASE_NAME=$1
+    local NAMESPACE=$2
+    echo "   Attempting to clear pending Helm operations for ${RELEASE_NAME}..."
+    
+    # Try rollback first (safest option)
+    echo "   Trying rollback..."
+    helm rollback "${RELEASE_NAME}" -n "${NAMESPACE}" 2>/dev/null || true
+    sleep 3
+    
+    # Check if release still exists and get its status
+    if helm list -n "${NAMESPACE}" 2>/dev/null | grep -q "${RELEASE_NAME}"; then
+        RELEASE_STATUS=$(helm status "${RELEASE_NAME}" -n "${NAMESPACE}" -o json 2>/dev/null | grep -o '"status":"[^"]*"' | cut -d'"' -f4 || echo "")
+        echo "   Current release status: ${RELEASE_STATUS}"
+        
+        # If still pending, try to find and delete the pending release secret
+        if [[ "$RELEASE_STATUS" == *"pending"* ]]; then
+            echo "   ⚠️  Release still in pending state, attempting to clear..."
+            # Find all Helm release secrets for this release
+            SECRETS=$(kubectl get secrets -n "${NAMESPACE}" -l owner=helm 2>/dev/null | grep "sh.helm.release.v1.${RELEASE_NAME}.v" | awk '{print $1}' || echo "")
+            
+            if [ -n "${SECRETS}" ]; then
+                # Get the latest secret (highest version number)
+                LATEST_SECRET=$(echo "${SECRETS}" | sort -V -r | head -1)
+                echo "   Found latest release secret: ${LATEST_SECRET}"
+                
+                # Try to get the status from the secret
+                SECRET_STATUS=$(kubectl get secret "${LATEST_SECRET}" -n "${NAMESPACE}" -o jsonpath='{.metadata.labels.status}' 2>/dev/null || echo "")
+                
+                if [[ "$SECRET_STATUS" == *"pending"* ]] || [[ -z "$SECRET_STATUS" ]]; then
+                    echo "   Deleting pending release secret to clear stuck state..."
+                    kubectl delete secret "${LATEST_SECRET}" -n "${NAMESPACE}" 2>/dev/null || true
+                    sleep 2
+                fi
+            fi
+        fi
     fi
-fi
+}
 
 echo "   Installing NGINX Ingress with static IP: ${INGRESS_IP}..."
-# Use --force to override any pending operations if they still exist
-helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
-    --namespace ingress-nginx \
-    --create-namespace \
-    --set controller.service.type=LoadBalancer \
-    --set controller.service.annotations."cloud\.google\.com/load-balancer-type"="External" \
-    --set controller.service.loadBalancerIP="${INGRESS_IP}" \
-    --wait \
-    --force
+# Try to install/upgrade with retry logic
+MAX_RETRIES=3
+RETRY_COUNT=0
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    if helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+        --namespace ingress-nginx \
+        --create-namespace \
+        --set controller.service.type=LoadBalancer \
+        --set controller.service.annotations."cloud\.google\.com/load-balancer-type"="External" \
+        --set controller.service.loadBalancerIP="${INGRESS_IP}" \
+        --wait \
+        --force 2>&1 | tee /tmp/helm-output.log; then
+        echo "   ✅ NGINX Ingress installed successfully"
+        break
+    else
+        if grep -q "another operation.*is in progress" /tmp/helm-output.log 2>/dev/null; then
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            echo "   ⚠️  Detected pending Helm operation (attempt ${RETRY_COUNT}/${MAX_RETRIES})"
+            clear_helm_pending "ingress-nginx" "ingress-nginx"
+            echo "   Retrying installation..."
+            sleep 5
+        else
+            echo "   ❌ Helm installation failed with different error"
+            cat /tmp/helm-output.log
+            exit 1
+        fi
+    fi
+done
+
+if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+    echo "   ❌ Failed to install NGINX Ingress after ${MAX_RETRIES} attempts"
+    exit 1
+fi
 
 echo "    NGINX Ingress installed with IP: ${INGRESS_IP}"
 echo ""
@@ -274,32 +323,42 @@ echo "Step 10: Deploying Open WebUI..."
 echo "   Installing/upgrading Open WebUI via Helm..."
 echo "   Note: Database will be automatically restored from backup via initContainer if enabled"
 
-# Check for pending Helm operations and handle them
-echo "   Checking for pending Helm operations..."
-if helm list -n "${NAMESPACE}" 2>/dev/null | grep -q "open-webui"; then
-    RELEASE_STATUS=$(helm status open-webui -n "${NAMESPACE}" -o json 2>/dev/null | grep -o '"status":"[^"]*"' | cut -d'"' -f4 || echo "")
-    if [ "$RELEASE_STATUS" = "pending-upgrade" ] || [ "$RELEASE_STATUS" = "pending-install" ] || [ "$RELEASE_STATUS" = "pending-rollback" ]; then
-        echo "   ⚠️  Pending Helm operation detected (status: ${RELEASE_STATUS})"
-        echo "   Attempting to rollback to clear pending state..."
-        helm rollback open-webui -n "${NAMESPACE}" 2>/dev/null || {
-            echo "   Rollback failed or not needed, trying to continue with --force..."
-        }
-        # Wait a bit for rollback to complete
-        sleep 5
-    fi
-fi
-
 # Always use --create-namespace to ensure Helm manages the namespace
 # If namespace exists, Helm will use it; if not, it will create it with proper metadata
 echo "   Deploying with Helm (namespace will be created if needed)..."
 echo "   Note: Deployment initiated, checking status..."
-# Use --force to override any pending operations if they still exist
-helm upgrade --install open-webui "${PROJECT_ROOT}/helm/open-webui" \
-    -n "${NAMESPACE}" \
-    -f "${PROJECT_ROOT}/helm/open-webui/values.yaml.local" \
-    --create-namespace \
-    --timeout 5m \
-    --force
+
+# Try to install/upgrade with retry logic
+MAX_RETRIES=3
+RETRY_COUNT=0
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    if helm upgrade --install open-webui "${PROJECT_ROOT}/helm/open-webui" \
+        -n "${NAMESPACE}" \
+        -f "${PROJECT_ROOT}/helm/open-webui/values.yaml.local" \
+        --create-namespace \
+        --timeout 5m \
+        --force 2>&1 | tee /tmp/helm-webui-output.log; then
+        echo "   ✅ Open WebUI deployed successfully"
+        break
+    else
+        if grep -q "another operation.*is in progress" /tmp/helm-webui-output.log 2>/dev/null; then
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            echo "   ⚠️  Detected pending Helm operation (attempt ${RETRY_COUNT}/${MAX_RETRIES})"
+            clear_helm_pending "open-webui" "${NAMESPACE}"
+            echo "   Retrying deployment..."
+            sleep 5
+        else
+            echo "   ❌ Helm deployment failed with different error"
+            cat /tmp/helm-webui-output.log
+            exit 1
+        fi
+    fi
+done
+
+if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+    echo "   ❌ Failed to deploy Open WebUI after ${MAX_RETRIES} attempts"
+    exit 1
+fi
 
 echo "    Helm deployment command completed"
 echo ""
