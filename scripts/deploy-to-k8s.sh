@@ -247,6 +247,27 @@ if ! kubectl get secret open-webui-secrets -n "${NAMESPACE}" >/dev/null 2>&1; th
 else
     echo "   Secret open-webui-secrets already exists"
 fi
+if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+    echo "   Ensuring OPENAI_API_KEY and OPENAI__API_KEY are set from OPENROUTER_API_KEY..."
+    kubectl patch secret open-webui-secrets -n "${NAMESPACE}" \
+      --type merge \
+      -p "$(cat <<PATCH
+{
+  "stringData": {
+    "OPENAI_API_KEY": "${OPENROUTER_API_KEY}",
+    "OPENAI__API_KEY": "${OPENROUTER_API_KEY}"
+  }
+}
+PATCH
+)" || {
+      echo "   Patch failed, applying via kubectl apply ..."
+      kubectl create secret generic open-webui-secrets \
+        --from-literal=OPENAI_API_KEY="${OPENROUTER_API_KEY}" \
+        --from-literal=OPENAI__API_KEY="${OPENROUTER_API_KEY}" \
+        -n "${NAMESPACE}" \
+        --dry-run=client -o yaml | kubectl apply -f - || true
+    }
+fi
 echo ""
 
 # Step 11: Ensure only 1 replica and no HPA (do this quickly, don't wait)
