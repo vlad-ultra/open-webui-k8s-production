@@ -189,9 +189,11 @@ tolerations: []
 affinity: {}
 
 # Horizontal Pod Autoscaler
+# ⚠️ IMPORTANT: Disabled because we use ReadWriteOnce (RWO) storage which only supports 1 pod
+# If multiple replicas are needed, use ReadWriteMany (RWX) storage class or StatefulSet
 autoscaling:
-  enabled: true
-  minReplicas: 2
+  enabled: false
+  minReplicas: 1
   maxReplicas: 5
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
