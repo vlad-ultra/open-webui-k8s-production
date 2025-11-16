@@ -62,8 +62,38 @@ else
 fi
 echo ""
 
+# Import existing GKE cluster and node pool if they already exist but are not in state
+echo "Step 3: Checking for existing GKE resources..."
+CLUSTER_EXISTS_IN_GCP=$(gcloud container clusters describe "${CLUSTER_NAME}" \
+    --zone="${GCP_ZONE}" \
+    --project="${GCP_PROJECT_ID}" \
+    --format="value(name)" 2>/dev/null || echo "")
+
+CLUSTER_IN_STATE=$(terraform state list 2>/dev/null | grep "google_container_cluster\\.cluster" || echo "")
+NODEPOOL_IN_STATE=$(terraform state list 2>/dev/null | grep "google_container_node_pool\\.primary" || echo "")
+
+if [ -n "${CLUSTER_EXISTS_IN_GCP}" ]; then
+    if [ -z "${CLUSTER_IN_STATE}" ]; then
+        echo "   Importing existing GKE cluster into terraform state..."
+        IMPORT_ID_CLUSTER="projects/${GCP_PROJECT_ID}/locations/${GCP_ZONE}/clusters/${CLUSTER_NAME}"
+        terraform import google_container_cluster.cluster "${IMPORT_ID_CLUSTER}" 2>/dev/null || true
+    else
+        echo "    GKE cluster already in terraform state"
+    fi
+    if [ -z "${NODEPOOL_IN_STATE}" ]; then
+        echo "   Importing existing node pool into terraform state..."
+        IMPORT_ID_NODEPOOL="projects/${GCP_PROJECT_ID}/locations/${GCP_ZONE}/clusters/${CLUSTER_NAME}/nodePools/${CLUSTER_NAME}-node-pool"
+        terraform import google_container_node_pool.primary "${IMPORT_ID_NODEPOOL}" 2>/dev/null || true
+    else
+        echo "    Node pool already in terraform state"
+    fi
+else
+    echo "    GKE cluster not found in GCP (will be created)"
+fi
+echo ""
+
 # Refresh state
-echo "Step 3: Refreshing terraform state..."
+echo "Step 4: Refreshing terraform state..."
 TF_VAR_project_id="${GCP_PROJECT_ID}" \
 TF_VAR_region="${GCP_REGION}" \
 TF_VAR_zone="${GCP_ZONE}" \
@@ -76,7 +106,7 @@ echo ""
 IP_IN_STATE=$(terraform state list 2>/dev/null | grep "google_compute_address.ingress_ip" || echo "")
 
 # Apply infrastructure
-echo "Step 4: Applying infrastructure..."
+echo "Step 5: Applying infrastructure..."
 if [ -n "${IP_IN_STATE}" ]; then
     echo "   Using -target to preserve existing IP..."
     TF_VAR_project_id="${GCP_PROJECT_ID}" \
