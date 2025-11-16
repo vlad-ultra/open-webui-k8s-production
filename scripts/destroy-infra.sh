@@ -16,7 +16,13 @@ GCP_REGION="${TF_VAR_region:-${GCP_REGION:-europe-west1}}"
 GCP_ZONE="${TF_VAR_zone:-${GCP_ZONE:-europe-west1-b}}"
 CLUSTER_NAME="${TF_VAR_cluster_name:-${CLUSTER_NAME:-open-webui-cluster}}"
 
-echo "Destroying infrastructure (IP will be preserved)..."
+PRESERVE_IP="${PRESERVE_IP:-true}"  # set to 'false' to fully destroy including IP
+
+if [ "$PRESERVE_IP" = "false" ]; then
+    echo "Destroying ALL infrastructure (including static IP)..."
+else
+    echo "Destroying infrastructure (IP will be preserved)..."
+fi
 echo ""
 
 # Initialize terraform if needed
@@ -26,19 +32,28 @@ if [ ! -d ".terraform" ]; then
     terraform init
 fi
 
-# Destroy all resources EXCEPT the IP address using -target
-echo "   Destroying cluster and node pool..."
-echo "   Using -target to preserve static IP address..."
 TF_VAR_project_id="${GCP_PROJECT_ID}" \
 TF_VAR_region="${GCP_REGION}" \
 TF_VAR_zone="${GCP_ZONE}" \
 TF_VAR_cluster_name="${CLUSTER_NAME}" \
-terraform destroy -auto-approve \
-  -target=google_container_cluster.cluster \
-  -target=google_container_node_pool.primary \
-  -target=google_project_service.apis
+if [ "$PRESERVE_IP" = "false" ]; then
+  echo "   Running full terraform destroy..."
+  terraform destroy -auto-approve
+else
+  # Destroy all resources EXCEPT the IP address using -target
+  echo "   Destroying cluster and node pool..."
+  echo "   Using -target to preserve static IP address..."
+  terraform destroy -auto-approve \
+    -target=google_container_cluster.cluster \
+    -target=google_container_node_pool.primary \
+    -target=google_project_service.apis
+fi
 
 echo ""
 echo "✅ Infrastructure destroyed!"
-echo "📍 Static IP preserved in GCP (will be reused on next apply)"
+if [ "$PRESERVE_IP" = "false" ]; then
+  echo "🗑️  Static IP removed"
+else
+  echo "📍 Static IP preserved in GCP (will be reused on next apply)"
+fi
 

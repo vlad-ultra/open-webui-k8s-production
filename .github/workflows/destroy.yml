@@ -2,6 +2,15 @@ name: Destroy Infrastructure
 
 on:
   workflow_dispatch:  # Manual trigger only
+    inputs:
+      preserve_ip:
+        description: 'Preserve static IP (true) or fully destroy (false)'
+        required: true
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
 
 env:
   # Required secrets - only 2 secrets needed!
@@ -133,6 +142,7 @@ jobs:
           GCP_REGION=${{ env.GCP_REGION }} \
           GCP_ZONE=${{ env.GCP_ZONE }} \
           CLUSTER_NAME=${{ env.CLUSTER_NAME }} \
+          PRESERVE_IP=${{ github.event.inputs.preserve_ip }} \
           ./scripts/destroy-infra.sh
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
