@@ -223,8 +223,23 @@ helm upgrade --install open-webui "${PROJECT_ROOT}/helm/open-webui" \
 echo "    Helm deployment command completed"
 echo ""
 
-# Step 10: Ensure only 1 replica and no HPA (do this quickly, don't wait)
-echo "Step 10: Ensuring single pod configuration..."
+# Step 10: Ensure required secrets exist (fallback for chart issues)
+echo "Step 10: Ensuring required secrets exist..."
+if ! kubectl get secret open-webui-secrets -n "${NAMESPACE}" >/dev/null 2>&1; then
+    echo "   Secret open-webui-secrets not found, creating fallback secret..."
+    FALLBACK_WEBUI_SECRET_KEY="${WEBUI_SECRET_KEY:-$(openssl rand -hex 32)}"
+    kubectl create secret generic open-webui-secrets \
+        --from-literal=WEBUI_SECRET_KEY="${FALLBACK_WEBUI_SECRET_KEY}" \
+        -n "${NAMESPACE}" \
+        --dry-run=client -o yaml | kubectl apply -f - || true
+    echo "    Secret open-webui-secrets ensured"
+else
+    echo "   Secret open-webui-secrets already exists"
+fi
+echo ""
+
+# Step 11: Ensure only 1 replica and no HPA (do this quickly, don't wait)
+echo "Step 11: Ensuring single pod configuration..."
 echo "   Checking for HPA..."
 if kubectl get hpa open-webui -n "${NAMESPACE}" 2>/dev/null; then
     echo "   Deleting HPA (autoscaling disabled)..."
@@ -238,7 +253,7 @@ echo "    Single pod configuration ensured"
 echo ""
 
 # Step 11: Check pod status (non-blocking)
-echo "Step 11: Checking pod status..."
+echo "Step 12: Checking pod status..."
 echo "   Waiting for pod to be ready (with timeout)..."
 if kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=open-webui -n "${NAMESPACE}" --timeout=60s 2>/dev/null; then
     echo "    Pod is ready"
@@ -249,7 +264,7 @@ fi
 echo ""
 
 # Step 12: Verify database restore (restore happens automatically via initContainer)
-echo "Step 12: Verifying database restore..."
+echo "Step 13: Verifying database restore..."
 echo "   Note: Database restore happens automatically via initContainer during pod startup"
 echo "   Checking if database was restored..."
 
