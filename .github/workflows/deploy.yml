@@ -113,3 +113,26 @@ jobs:
           kubectl get ingress -n ${{ env.NAMESPACE }}
           echo ""
           echo " Application URL: https://${{ env.DOMAIN }}"
+      
+      - name: Diagnose pod if not Ready
+        run: |
+          set -e
+          NS=${{ env.NAMESPACE }}
+          echo "🔎 Diagnosing pod status in namespace ${NS} ..."
+          POD=$(kubectl get pods -n "${NS}" -l app.kubernetes.io/name=open-webui -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          if [ -z "${POD}" ]; then
+            echo "No pod found with label app.kubernetes.io/name=open-webui"
+            exit 1
+          fi
+          READY=$(kubectl get pod "${POD}" -n "${NS}" -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null || echo "false")
+          if [ "${READY}" = "true" ]; then
+            echo "✅ Pod ${POD} is Ready"
+            exit 0
+          fi
+          echo "❗ Pod ${POD} is not Ready. Fetching description and recent events..."
+          echo "---- kubectl describe pod ${POD} ----"
+          kubectl describe pod "${POD}" -n "${NS}" || true
+          echo "---- recent events ----"
+          kubectl get events -n "${NS}" --sort-by=.lastTimestamp | tail -n 50 || true
+          # Surface failure to make it visible in CI
+          exit 1
