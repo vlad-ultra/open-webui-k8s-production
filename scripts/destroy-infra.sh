@@ -32,10 +32,12 @@ if [ ! -d ".terraform" ]; then
     terraform init
 fi
 
-TF_VAR_project_id="${GCP_PROJECT_ID}" \
-TF_VAR_region="${GCP_REGION}" \
-TF_VAR_zone="${GCP_ZONE}" \
-TF_VAR_cluster_name="${CLUSTER_NAME}" \
+# Ensure Terraform picks up variables in subsequent commands
+export TF_VAR_project_id="${GCP_PROJECT_ID}"
+export TF_VAR_region="${GCP_REGION}"
+export TF_VAR_zone="${GCP_ZONE}"
+export TF_VAR_cluster_name="${CLUSTER_NAME}"
+
 if [ "$PRESERVE_IP" = "false" ]; then
   echo "   Running full terraform destroy..."
   terraform destroy -auto-approve
