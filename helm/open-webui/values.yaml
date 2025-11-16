@@ -80,8 +80,8 @@ service:
 # Persistent Volume Configuration
 persistence:
   enabled: true
-  storageClass: ""  # Use default storage class that supports RWX, or set to specific RWX storage class
-  accessMode: ReadWriteMany  # Changed to RWX to support multiple replicas
+  storageClass: nfs-client  # NFS provisioner storage class that supports ReadWriteMany (RWX)
+  accessMode: ReadWriteMany  # RWX required for multiple replicas
   size: 10Gi
   annotations: {}
 

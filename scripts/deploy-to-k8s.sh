@@ -205,6 +205,29 @@ fi
 echo "   cert-manager installed and SSL certificate ready"
 echo ""
 
+# Step 5.5: Install NFS provisioner for ReadWriteMany support (if not already installed)
+echo "Step 5.5: Checking NFS provisioner for ReadWriteMany support..."
+# Check if storage class exists and is working
+NFS_PROVISIONER_NEEDED=true
+if kubectl get storageclass nfs-client >/dev/null 2>&1; then
+    # Check if NFS provisioner pod is actually running
+    if kubectl get pods -n nfs-provisioner -l app=nfs-subdir-external-provisioner --field-selector=status.phase=Running --no-headers 2>/dev/null | grep -q .; then
+        echo "   NFS provisioner already installed and running (storage class 'nfs-client' exists)"
+        NFS_PROVISIONER_NEEDED=false
+    else
+        echo "   Storage class 'nfs-client' exists but provisioner pod not running. Reinstalling..."
+    fi
+fi
+
+if [ "$NFS_PROVISIONER_NEEDED" = "true" ]; then
+    echo "   NFS provisioner not found or not working. Installing..."
+    echo "   Note: This is normal when infrastructure is recreated (cluster was destroyed and recreated)"
+    chmod +x "${PROJECT_ROOT}/scripts/install-nfs-provisioner.sh"
+    "${PROJECT_ROOT}/scripts/install-nfs-provisioner.sh"
+    echo "   NFS provisioner installed successfully"
+fi
+echo ""
+
 # Step 6: Create GCP Service Account Secret (for initContainer to access GCS)
 echo "Step 6: Creating GCP Service Account secret for initContainer..."
 if [ -n "${GCP_SA_KEY:-}" ]; then
@@ -318,8 +341,91 @@ PATCH
 fi
 echo ""
 
-# Step 10: Deploy Open WebUI (with automatic backup restore via initContainer)
-echo "Step 10: Deploying Open WebUI..."
+# Step 10: Check and migrate PVC if access mode changed (RWO -> RWX)
+echo "Step 10: Checking PVC access mode compatibility..."
+# Find PVC by label (more reliable than hardcoded name)
+PVC_NAME=$(kubectl get pvc -n "${NAMESPACE}" -l app.kubernetes.io/name=open-webui -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+if [ -z "${PVC_NAME}" ]; then
+    # Fallback to standard naming convention
+    PVC_NAME="open-webui-pvc"
+fi
+EXISTING_PVC_ACCESS_MODE=$(kubectl get pvc "${PVC_NAME}" -n "${NAMESPACE}" -o jsonpath='{.spec.accessModes[0]}' 2>/dev/null || echo "")
+DESIRED_ACCESS_MODE=$(grep "^[[:space:]]*accessMode:" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local" | head -1 | sed 's/.*accessMode:[[:space:]]*\([^#]*\).*/\1/' | tr -d '"' | tr -d ' ' || echo "ReadWriteMany")
+
+# Check if ReadWriteMany is requested and verify storage class compatibility
+if [ "${DESIRED_ACCESS_MODE}" = "ReadWriteMany" ]; then
+    STORAGE_CLASS=$(grep "^[[:space:]]*storageClass:" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local" | head -1 | sed 's/.*storageClass:[[:space:]]*\([^#]*\).*/\1/' | tr -d '"' | tr -d ' ' || echo "")
+    if [ -z "${STORAGE_CLASS}" ] || [ "${STORAGE_CLASS}" = '""' ]; then
+        DEFAULT_STORAGE_CLASS=$(kubectl get storageclass -o jsonpath='{.items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")].metadata.name}' 2>/dev/null || echo "")
+        if [ -n "${DEFAULT_STORAGE_CLASS}" ]; then
+            echo "   Warning: ReadWriteMany requested but using default storage class '${DEFAULT_STORAGE_CLASS}'"
+            echo "   Standard GKE storage classes (standard, pd-standard, pd-ssd) do NOT support ReadWriteMany"
+            echo "   NFS provisioner should be installed automatically in Step 5.5"
+            echo "   If PVC creation fails, check if NFS provisioner is installed: kubectl get storageclass nfs-client"
+        fi
+    elif [ "${STORAGE_CLASS}" = "nfs-client" ]; then
+        if ! kubectl get storageclass nfs-client >/dev/null 2>&1; then
+            echo "   Warning: Storage class 'nfs-client' requested but not found"
+            echo "   NFS provisioner should be installed automatically in Step 5.5"
+            echo "   If this persists, run: ./scripts/install-nfs-provisioner.sh"
+        else
+            echo "   Using NFS provisioner storage class 'nfs-client' (supports ReadWriteMany)"
+        fi
+    fi
+fi
+
+if [ -n "${EXISTING_PVC_ACCESS_MODE}" ] && [ "${EXISTING_PVC_ACCESS_MODE}" != "${DESIRED_ACCESS_MODE}" ]; then
+    echo "   WARNING: PVC '${PVC_NAME}' exists with access mode '${EXISTING_PVC_ACCESS_MODE}' but desired mode is '${DESIRED_ACCESS_MODE}'"
+    echo "   PVC access mode cannot be changed after creation. Migrating PVC..."
+    echo "   This will:"
+    echo "     1. Scale down deployment to 0 replicas"
+    echo "     2. Delete old PVC (data will be restored from backup)"
+    echo "     3. Allow Helm to create new PVC with correct access mode"
+    echo "     4. Restore data automatically via initContainer"
+    
+    # Scale down deployment if exists
+    if kubectl get deployment open-webui -n "${NAMESPACE}" >/dev/null 2>&1; then
+        echo "   Scaling down deployment..."
+        kubectl scale deployment open-webui -n "${NAMESPACE}" --replicas=0
+        echo "   Waiting for pods to terminate..."
+        sleep 15
+        # Wait for all pods to actually terminate
+        while kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/name=open-webui --no-headers 2>/dev/null | grep -v "No resources" | grep -q .; do
+            echo "   Still waiting for pods to terminate..."
+            sleep 5
+        done
+    fi
+    
+    # Delete old PVC
+    echo "   Deleting old PVC '${PVC_NAME}'..."
+    kubectl delete pvc "${PVC_NAME}" -n "${NAMESPACE}" --wait=true || {
+        echo "   Warning: Failed to delete PVC. It may be in use. Trying force delete..."
+        # Try to find and delete any pods still using the PVC
+        kubectl get pods -n "${NAMESPACE}" -o json | jq -r '.items[] | select(.spec.volumes[]?.persistentVolumeClaim?.claimName=="'${PVC_NAME}'") | .metadata.name' | while read pod; do
+            if [ -n "${pod}" ]; then
+                echo "   Force deleting pod ${pod} that may be using PVC..."
+                kubectl delete pod "${pod}" -n "${NAMESPACE}" --force --grace-period=0 2>/dev/null || true
+            fi
+        done
+        sleep 5
+        kubectl delete pvc "${PVC_NAME}" -n "${NAMESPACE}" --wait=true || {
+            echo "   Error: Could not delete PVC. Manual intervention may be required."
+            echo "   You may need to manually delete the PVC after ensuring no pods are using it."
+        }
+    }
+    echo "   Old PVC deleted. New PVC will be created by Helm with access mode '${DESIRED_ACCESS_MODE}'"
+    echo "   Data will be automatically restored from backup via initContainer"
+else
+    if [ -n "${EXISTING_PVC_ACCESS_MODE}" ]; then
+        echo "   PVC '${PVC_NAME}' exists with access mode '${EXISTING_PVC_ACCESS_MODE}' (matches desired mode '${DESIRED_ACCESS_MODE}')"
+    else
+        echo "   PVC does not exist yet (will be created by Helm with access mode '${DESIRED_ACCESS_MODE}')"
+    fi
+fi
+echo ""
+
+# Step 11: Deploy Open WebUI (with automatic backup restore via initContainer)
+echo "Step 11: Deploying Open WebUI..."
 echo "   Installing/upgrading Open WebUI via Helm..."
 echo "   Note: Database will be automatically restored from backup via initContainer if enabled"
 
@@ -363,8 +469,8 @@ fi
 echo "    Helm deployment command completed"
 echo ""
 
-# Step 11: Ensure required secrets exist (fallback for chart issues) — kept as safety
-echo "Step 11: Ensuring required secrets exist (post-deploy safety)..."
+# Step 12: Ensure required secrets exist (fallback for chart issues) — kept as safety
+echo "Step 12: Ensuring required secrets exist (post-deploy safety)..."
 kubectl get secret open-webui-secrets -n "${NAMESPACE}" >/dev/null 2>&1 || {
   echo "   Secret unexpectedly missing; creating fallback..."
   FALLBACK_WEBUI_SECRET_KEY="${WEBUI_SECRET_KEY:-$(openssl rand -hex 32)}"
@@ -386,8 +492,8 @@ PATCH
 fi
 echo ""
 
-# Step 12: Ensure HPA is disabled (if needed)
-echo "Step 12: Checking HPA configuration..."
+# Step 13: Ensure HPA is disabled (if needed)
+echo "Step 13: Checking HPA configuration..."
 if kubectl get hpa open-webui -n "${NAMESPACE}" 2>/dev/null; then
     echo "   HPA found, checking if it should be disabled..."
     # HPA can be left enabled if configured in values.yaml
@@ -396,8 +502,8 @@ else
 fi
 echo ""
 
-# Step 11: Check pod status (non-blocking)
-echo "Step 13: Checking pod status..."
+# Step 14: Check pod status (non-blocking)
+echo "Step 14: Checking pod status..."
 echo "   Waiting for rollout to complete (with timeout)..."
 if kubectl rollout status deployment/open-webui -n "${NAMESPACE}" --timeout=180s 2>/dev/null; then
     echo "    Pod is ready"
@@ -409,8 +515,8 @@ else
 fi
 echo ""
 
-# Step 14: Verify database restore (restore happens automatically via initContainer)
-echo "Step 14: Verifying database restore..."
+# Step 15: Verify database restore (restore happens automatically via initContainer)
+echo "Step 15: Verifying database restore..."
 echo "   Note: Database restore happens automatically via initContainer during pod startup"
 echo "   Checking if database was restored..."
 
