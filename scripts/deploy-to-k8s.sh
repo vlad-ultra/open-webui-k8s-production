@@ -104,14 +104,31 @@ helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx 2>/dev/nu
 echo "   Updating Helm repositories..."
 helm repo update
 
+# Check for pending Helm operations and handle them
+echo "   Checking for pending Helm operations..."
+if helm list -n ingress-nginx 2>/dev/null | grep -q "ingress-nginx"; then
+    RELEASE_STATUS=$(helm status ingress-nginx -n ingress-nginx -o json 2>/dev/null | grep -o '"status":"[^"]*"' | cut -d'"' -f4 || echo "")
+    if [ "$RELEASE_STATUS" = "pending-upgrade" ] || [ "$RELEASE_STATUS" = "pending-install" ] || [ "$RELEASE_STATUS" = "pending-rollback" ]; then
+        echo "   ⚠️  Pending Helm operation detected (status: ${RELEASE_STATUS})"
+        echo "   Attempting to rollback to clear pending state..."
+        helm rollback ingress-nginx -n ingress-nginx 2>/dev/null || {
+            echo "   Rollback failed or not needed, trying to continue with --force..."
+        }
+        # Wait a bit for rollback to complete
+        sleep 5
+    fi
+fi
+
 echo "   Installing NGINX Ingress with static IP: ${INGRESS_IP}..."
+# Use --force to override any pending operations if they still exist
 helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
     --namespace ingress-nginx \
     --create-namespace \
     --set controller.service.type=LoadBalancer \
     --set controller.service.annotations."cloud\.google\.com/load-balancer-type"="External" \
     --set controller.service.loadBalancerIP="${INGRESS_IP}" \
-    --wait
+    --wait \
+    --force
 
 echo "    NGINX Ingress installed with IP: ${INGRESS_IP}"
 echo ""
@@ -257,15 +274,32 @@ echo "Step 10: Deploying Open WebUI..."
 echo "   Installing/upgrading Open WebUI via Helm..."
 echo "   Note: Database will be automatically restored from backup via initContainer if enabled"
 
+# Check for pending Helm operations and handle them
+echo "   Checking for pending Helm operations..."
+if helm list -n "${NAMESPACE}" 2>/dev/null | grep -q "open-webui"; then
+    RELEASE_STATUS=$(helm status open-webui -n "${NAMESPACE}" -o json 2>/dev/null | grep -o '"status":"[^"]*"' | cut -d'"' -f4 || echo "")
+    if [ "$RELEASE_STATUS" = "pending-upgrade" ] || [ "$RELEASE_STATUS" = "pending-install" ] || [ "$RELEASE_STATUS" = "pending-rollback" ]; then
+        echo "   ⚠️  Pending Helm operation detected (status: ${RELEASE_STATUS})"
+        echo "   Attempting to rollback to clear pending state..."
+        helm rollback open-webui -n "${NAMESPACE}" 2>/dev/null || {
+            echo "   Rollback failed or not needed, trying to continue with --force..."
+        }
+        # Wait a bit for rollback to complete
+        sleep 5
+    fi
+fi
+
 # Always use --create-namespace to ensure Helm manages the namespace
 # If namespace exists, Helm will use it; if not, it will create it with proper metadata
 echo "   Deploying with Helm (namespace will be created if needed)..."
 echo "   Note: Deployment initiated, checking status..."
+# Use --force to override any pending operations if they still exist
 helm upgrade --install open-webui "${PROJECT_ROOT}/helm/open-webui" \
     -n "${NAMESPACE}" \
     -f "${PROJECT_ROOT}/helm/open-webui/values.yaml.local" \
     --create-namespace \
-    --timeout 5m
+    --timeout 5m \
+    --force
 
 echo "    Helm deployment command completed"
 echo ""
