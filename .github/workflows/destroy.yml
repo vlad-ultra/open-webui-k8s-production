@@ -175,6 +175,7 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
 
       - name: Import existing GKE resources into state
+        working-directory: terraform
         run: |
           echo "🔄 Importing existing GKE resources into Terraform state (if present)..."
           set -e
@@ -185,15 +186,17 @@ jobs:
           
           if gcloud container clusters describe "$CLUSTER" --zone "$ZONE" --project "$PROJECT" >/dev/null 2>&1; then
             echo "Cluster exists in GCP. Importing into state..."
-            pushd terraform >/dev/null
-            terraform import -no-color google_container_cluster.cluster "projects/${PROJECT}/locations/${ZONE}/clusters/${CLUSTER}" || true
-            terraform import -no-color google_container_node_pool.primary "projects/${PROJECT}/locations/${ZONE}/clusters/${CLUSTER}/nodePools/${NODE_POOL}" || true
-            popd >/dev/null
+            terraform import -no-color -input=false google_container_cluster.cluster "projects/${PROJECT}/locations/${ZONE}/clusters/${CLUSTER}" || true
+            terraform import -no-color -input=false google_container_node_pool.primary "projects/${PROJECT}/locations/${ZONE}/clusters/${CLUSTER}/nodePools/${NODE_POOL}" || true
           else
             echo "GKE cluster not found in GCP; nothing to import."
           fi
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+          TF_VAR_project_id: ${{ env.GCP_PROJECT_ID }}
+          TF_VAR_region: ${{ env.GCP_REGION }}
+          TF_VAR_zone: ${{ env.GCP_ZONE }}
+          TF_VAR_cluster_name: ${{ env.CLUSTER_NAME }}
 
       - name: Terraform destroy (preserve IP)
         if: ${{ github.event.inputs.preserve_ip == 'true' }}
