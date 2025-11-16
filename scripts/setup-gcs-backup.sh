@@ -14,13 +14,13 @@ if [ -z "${PROJECT_ID}" ]; then
     exit 1
 fi
 
-echo "🔧 Setting up GCS bucket for backups..."
+echo "Setting up GCS bucket for backups..."
 echo "   Project: ${PROJECT_ID}"
 echo "   Bucket: ${BUCKET_NAME}"
 echo "   Region: ${REGION}"
 
 # Create bucket
-echo "📦 Creating GCS bucket..."
+echo "Creating GCS bucket..."
 gsutil mb -p "${PROJECT_ID}" -l "${REGION}" "gs://${BUCKET_NAME}" 2>/dev/null || {
     if [ $? -eq 1 ]; then
         echo "  Bucket already exists, continuing..."
@@ -31,7 +31,7 @@ gsutil mb -p "${PROJECT_ID}" -l "${REGION}" "gs://${BUCKET_NAME}" 2>/dev/null ||
 }
 
 # Set lifecycle policy (keep backups for 90 days)
-echo "⚙️  Setting lifecycle policy..."
+echo "Setting lifecycle policy..."
 cat <<EOF > /tmp/lifecycle.json
 {
   "lifecycle": {

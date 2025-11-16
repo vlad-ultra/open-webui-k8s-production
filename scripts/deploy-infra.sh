@@ -20,7 +20,7 @@ GCP_ZONE="${TF_VAR_zone:-${GCP_ZONE:-europe-west1-b}}"
 CLUSTER_NAME="${TF_VAR_cluster_name:-${CLUSTER_NAME:-open-webui-cluster}}"
 IP_NAME="${CLUSTER_NAME}-ingress-ip"
 
-echo "🚀 Deploying infrastructure with Terraform..."
+echo "Deploying infrastructure with Terraform..."
 echo ""
 
 cd "${PROJECT_ROOT}/terraform"
@@ -155,6 +155,6 @@ if [ -n "${INGRESS_IP}" ]; then
 fi
 
 echo ""
-echo "💡 Next step: Deploy application to Kubernetes"
+echo "Next step: Deploy application to Kubernetes"
 echo "   Run: ./scripts/deploy-to-k8s.sh"
 

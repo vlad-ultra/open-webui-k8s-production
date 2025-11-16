@@ -71,7 +71,7 @@ echo "   Cluster credentials configured"
 echo ""
 
 # Step 3: Get static IP from terraform or GCP
-echo "📍 Step 3: Getting static IP address..."
+echo "Step 3: Getting static IP address..."
 cd "${PROJECT_ROOT}/terraform"
 INGRESS_IP=$(TF_VAR_project_id="${GCP_PROJECT_ID}" \
   TF_VAR_region="${GCP_REGION}" \
@@ -122,7 +122,7 @@ clear_helm_pending() {
         
         # If still pending, try to find and delete the pending release secret
         if [[ "$RELEASE_STATUS" == *"pending"* ]]; then
-            echo "   ⚠️  Release still in pending state, attempting to clear..."
+            echo "   Warning: Release still in pending state, attempting to clear..."
             # Find all Helm release secrets for this release
             SECRETS=$(kubectl get secrets -n "${NAMESPACE}" -l owner=helm 2>/dev/null | grep "sh.helm.release.v1.${RELEASE_NAME}.v" | awk '{print $1}' || echo "")
             
@@ -157,17 +157,17 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
         --set controller.service.loadBalancerIP="${INGRESS_IP}" \
         --wait \
         --force 2>&1 | tee /tmp/helm-output.log; then
-        echo "   ✅ NGINX Ingress installed successfully"
+        echo "   NGINX Ingress installed successfully"
         break
     else
         if grep -q "another operation.*is in progress" /tmp/helm-output.log 2>/dev/null; then
             RETRY_COUNT=$((RETRY_COUNT + 1))
-            echo "   ⚠️  Detected pending Helm operation (attempt ${RETRY_COUNT}/${MAX_RETRIES})"
+            echo "   Warning: Detected pending Helm operation (attempt ${RETRY_COUNT}/${MAX_RETRIES})"
             clear_helm_pending "ingress-nginx" "ingress-nginx"
             echo "   Retrying installation..."
             sleep 5
         else
-            echo "   ❌ Helm installation failed with different error"
+            echo "   Error: Helm installation failed with different error"
             cat /tmp/helm-output.log
             exit 1
         fi
@@ -175,7 +175,7 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
 done
 
 if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-    echo "   ❌ Failed to install NGINX Ingress after ${MAX_RETRIES} attempts"
+    echo "   Error: Failed to install NGINX Ingress after ${MAX_RETRIES} attempts"
     exit 1
 fi
 
@@ -202,7 +202,7 @@ else
     echo "   TLS secret already exists in Kubernetes, skipping certificate creation"
 fi
 
-echo "   ✅ cert-manager installed and SSL certificate ready"
+echo "   cert-manager installed and SSL certificate ready"
 echo ""
 
 # Step 6: Create GCP Service Account Secret (for initContainer to access GCS)
@@ -338,17 +338,17 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
         --create-namespace \
         --timeout 5m \
         --force 2>&1 | tee /tmp/helm-webui-output.log; then
-        echo "   ✅ Open WebUI deployed successfully"
+        echo "   Open WebUI deployed successfully"
         break
     else
         if grep -q "another operation.*is in progress" /tmp/helm-webui-output.log 2>/dev/null; then
             RETRY_COUNT=$((RETRY_COUNT + 1))
-            echo "   ⚠️  Detected pending Helm operation (attempt ${RETRY_COUNT}/${MAX_RETRIES})"
+            echo "   Warning: Detected pending Helm operation (attempt ${RETRY_COUNT}/${MAX_RETRIES})"
             clear_helm_pending "open-webui" "${NAMESPACE}"
             echo "   Retrying deployment..."
             sleep 5
         else
-            echo "   ❌ Helm deployment failed with different error"
+            echo "   Error: Helm deployment failed with different error"
             cat /tmp/helm-webui-output.log
             exit 1
         fi
@@ -356,7 +356,7 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
 done
 
 if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-    echo "   ❌ Failed to deploy Open WebUI after ${MAX_RETRIES} attempts"
+    echo "   Error: Failed to deploy Open WebUI after ${MAX_RETRIES} attempts"
     exit 1
 fi
 

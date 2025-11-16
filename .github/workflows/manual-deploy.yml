@@ -192,6 +192,6 @@ jobs:
           mkdir -p backups
           gsutil cp gs://${{ env.BACKUP_BUCKET }}/latest.db backups/webui_backup_latest.db 2>/dev/null && {
             echo "Restoring database..."
-            ./backup/restore-database.sh backups/webui_backup_latest.db || echo "⚠️ Restore failed, continuing..."
+            ./backup/restore-database.sh backups/webui_backup_latest.db || echo "Warning: Restore failed, continuing..."
           } || echo " No backup found, skipping restore"
 

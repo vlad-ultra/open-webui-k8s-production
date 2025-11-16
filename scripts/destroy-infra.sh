@@ -52,10 +52,10 @@ else
 fi
 
 echo ""
-echo "✅ Infrastructure destroyed!"
+echo "Infrastructure destroyed!"
 if [ "$PRESERVE_IP" = "false" ]; then
-  echo "🗑️  Static IP removed"
+  echo "Static IP removed"
 else
-  echo "📍 Static IP preserved in GCP (will be reused on next apply)"
+  echo "Static IP preserved in GCP (will be reused on next apply)"
 fi
 

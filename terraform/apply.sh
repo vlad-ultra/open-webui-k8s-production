@@ -18,12 +18,12 @@ GCP_ZONE="${TF_VAR_zone:-${GCP_ZONE:-europe-west1-b}}"
 CLUSTER_NAME="${TF_VAR_cluster_name:-open-webui-cluster}"
 IP_NAME="${CLUSTER_NAME}-ingress-ip"
 
-echo "🚀 Applying infrastructure..."
+echo "Applying infrastructure..."
 echo ""
 
 # Initialize terraform if needed
 if [ ! -d ".terraform" ]; then
-    echo "📝 Initializing terraform..."
+    echo "Initializing terraform..."
     terraform init
 fi
 
@@ -36,21 +36,21 @@ IP_EXISTS_IN_GCP=$(gcloud compute addresses describe "${IP_NAME}" \
 IP_IN_STATE=$(terraform state list 2>/dev/null | grep "google_compute_address.ingress_ip" || echo "")
 
 if [ -n "${IP_EXISTS_IN_GCP}" ] && [ -z "${IP_IN_STATE}" ]; then
-    echo "📍 Found existing IP in GCP, importing to terraform state..."
+    echo "Found existing IP in GCP, importing to terraform state..."
     echo "   IP: ${IP_EXISTS_IN_GCP}"
     
     IMPORT_ID="projects/${GCP_PROJECT_ID}/regions/${GCP_REGION}/addresses/${IP_NAME}"
     
     if terraform import google_compute_address.ingress_ip "${IMPORT_ID}" 2>/dev/null; then
-        echo "   ✅ IP imported successfully"
+        echo "   IP imported successfully"
     else
-        echo "   ⚠️  Import failed, terraform will try to create it (may fail if IP exists)"
+        echo "   Warning: Import failed, terraform will try to create it (may fail if IP exists)"
     fi
     echo ""
 fi
 
 # Refresh state to sync with GCP
-echo "🔄 Refreshing terraform state..."
+echo "Refreshing terraform state..."
 TF_VAR_project_id="${GCP_PROJECT_ID}" \
 TF_VAR_region="${GCP_REGION}" \
 TF_VAR_zone="${GCP_ZONE}" \
@@ -61,11 +61,11 @@ terraform refresh > /dev/null 2>&1 || true
 IP_IN_STATE=$(terraform state list 2>/dev/null | grep "google_compute_address.ingress_ip" || echo "")
 
 # Apply infrastructure
-echo "🏗️  Applying infrastructure..."
+echo "Applying infrastructure..."
 
 # If IP is in state, use -target to exclude it from plan (prevents destroy error)
 if [ -n "${IP_IN_STATE}" ]; then
-    echo "   📍 IP already in state, applying with -target to preserve it..."
+    echo "   IP already in state, applying with -target to preserve it..."
     TF_VAR_project_id="${GCP_PROJECT_ID}" \
     TF_VAR_region="${GCP_REGION}" \
     TF_VAR_zone="${GCP_ZONE}" \
@@ -84,18 +84,18 @@ else
 fi
 
 echo ""
-echo "✅ Infrastructure applied!"
+echo "Infrastructure applied!"
 INGRESS_IP=$(TF_VAR_project_id="${GCP_PROJECT_ID}" \
   TF_VAR_region="${GCP_REGION}" \
   TF_VAR_zone="${GCP_ZONE}" \
   TF_VAR_cluster_name="${CLUSTER_NAME}" \
   terraform output -raw ingress_ip 2>/dev/null || echo "")
 if [ -n "${INGRESS_IP}" ]; then
-    echo "📍 Static IP: ${INGRESS_IP}"
+    echo "Static IP: ${INGRESS_IP}"
 fi
 
 echo ""
-echo "📝 To deploy application, run:"
+echo "To deploy application, run:"
 echo "   ./scripts/deploy-to-k8s.sh"
 echo ""
 echo "   Or from project root: ./scripts/deploy-to-k8s.sh"

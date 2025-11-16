@@ -79,8 +79,8 @@ else
     
     # Upload to GCS bucket
     echo "   Uploading new certificates to GCS bucket..."
-    gsutil cp "${CERT_FILE}" "${GCS_CERT_FILE}" 2>/dev/null || echo "   ⚠️  Warning: Could not upload to GCS (will use local only)"
-    gsutil cp "${KEY_FILE}" "${GCS_KEY_FILE}" 2>/dev/null || echo "   ⚠️  Warning: Could not upload to GCS (will use local only)"
+    gsutil cp "${CERT_FILE}" "${GCS_CERT_FILE}" 2>/dev/null || echo "   Warning: Could not upload to GCS (will use local only)"
+    gsutil cp "${KEY_FILE}" "${GCS_KEY_FILE}" 2>/dev/null || echo "   Warning: Could not upload to GCS (will use local only)"
     
     CERT_FILE_TO_USE="${CERT_FILE}"
     KEY_FILE_TO_USE="${KEY_FILE}"
@@ -109,7 +109,7 @@ kubectl create secret tls "${SECRET_NAME}" \
 echo ""
 echo " Self-signed certificate created and saved to Kubernetes secret!"
 echo ""
-echo "📋 Certificate details:"
+echo "Certificate details:"
 echo "   Domain: ${DOMAIN}"
 echo "   Secret: ${SECRET_NAME} (namespace: ${NAMESPACE})"
 echo "   Valid for: 365 days"

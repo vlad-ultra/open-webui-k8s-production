@@ -8,7 +8,7 @@ PROJECT_ID="${1:-ai-cluster-478022}"
 SERVICE_ACCOUNT_NAME="github-actions-deploy"
 SERVICE_ACCOUNT_EMAIL="${SERVICE_ACCOUNT_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
-echo "🔍 Creating Service Account for project: $PROJECT_ID"
+echo "Creating Service Account for project: $PROJECT_ID"
 echo "=========================================="
 echo ""
 
@@ -92,7 +92,7 @@ echo ""
 
 # Display secrets
 echo "=========================================="
-echo "📋 GITHUB SECRETS - COPY THESE VALUES"
+echo "GITHUB SECRETS - COPY THESE VALUES"
 echo "=========================================="
 echo ""
 echo "1. GCP_PROJECT_ID:"

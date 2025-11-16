@@ -94,7 +94,7 @@ jobs:
           POD_NAME=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app.kubernetes.io/name=open-webui -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
           
           if [ -n "$POD_NAME" ]; then
-            echo "📦 Backing up database from pod: $POD_NAME"
+            echo "Backing up database from pod: $POD_NAME"
             kubectl cp ${{ env.NAMESPACE }}/$POD_NAME:/app/backend/data/webui.db backups/webui_backup_$(date +%Y%m%d_%H%M%S).db
             
             # Upload to GCS
@@ -126,11 +126,11 @@ jobs:
         run: |
           echo "Verifying database backup in gs://${{ env.BACKUP_BUCKET }}/latest.db ..."
           if gsutil -q stat gs://${{ env.BACKUP_BUCKET }}/latest.db; then
-            echo "✅ Database backup deployed to gs://${{ env.BACKUP_BUCKET }}/latest.db"
+            echo "Database backup deployed to gs://${{ env.BACKUP_BUCKET }}/latest.db"
             echo "Details:"
             gsutil stat gs://${{ env.BACKUP_BUCKET }}/latest.db | sed -n -e 's/^\s\{4\}Update time:\s\{12\}/Updated: /p' -e 's/^\s\{4\}Content-Length:\s\{9\}/Size: /p'
           else
-            echo "❌ Database backup NOT found in gs://${{ env.BACKUP_BUCKET }}/latest.db"
+            echo "Error: Database backup NOT found in gs://${{ env.BACKUP_BUCKET }}/latest.db"
             exit 1
           fi
 
@@ -187,7 +187,7 @@ jobs:
       - name: Import existing GKE resources into state
         working-directory: terraform
         run: |
-          echo "🔄 Importing existing GKE resources into Terraform state (if present)..."
+          echo "Importing existing GKE resources into Terraform state (if present)..."
           set -e
           PROJECT=${{ env.GCP_PROJECT_ID }}
           ZONE=${{ env.GCP_ZONE }}
@@ -211,7 +211,7 @@ jobs:
       - name: Ensure deletion_protection is disabled on cluster
         working-directory: terraform
         run: |
-          echo "🔧 Ensuring deletion_protection=false on GKE cluster before destroy..."
+          echo "Ensuring deletion_protection=false on GKE cluster before destroy..."
           terraform apply -auto-approve -no-color -input=false -target=google_container_cluster.cluster
         env:
           TF_VAR_project_id: ${{ env.GCP_PROJECT_ID }}
@@ -258,23 +258,23 @@ jobs:
 
       - name: Verify GKE destruction
         run: |
-          echo "🔍 Verifying GKE cluster destruction..."
+          echo "Verifying GKE cluster destruction..."
           if gcloud container clusters describe ${{ env.CLUSTER_NAME }} --zone ${{ env.GCP_ZONE }} --project ${{ env.GCP_PROJECT_ID }} >/dev/null 2>&1; then
-            echo "❌ Cluster still exists"
+            echo "Error: Cluster still exists"
             echo "GKE_DESTROYED=false" >> $GITHUB_ENV
           else
-            echo "✅ Cluster destroyed"
+            echo "Cluster destroyed"
             echo "GKE_DESTROYED=true" >> $GITHUB_ENV
           fi
           
           # Verify static IP remains (should be preserved)
-          echo "🔍 Verifying static IP preservation..."
+          echo "Verifying static IP preservation..."
           if gcloud compute addresses describe ${{
             env.CLUSTER_NAME }}-ingress-ip --region=${{ env.GCP_REGION }} --project=${{ env.GCP_PROJECT_ID }} >/dev/null 2>&1; then
-            echo "📍 Static IP is preserved"
+            echo "Static IP is preserved"
             echo "IP_PRESERVED=true" >> $GITHUB_ENV
           else
-            echo "⚠️  Static IP not found (expected to be preserved)"
+            echo "Warning: Static IP not found (expected to be preserved)"
             echo "IP_PRESERVED=false" >> $GITHUB_ENV
           fi
         env:
