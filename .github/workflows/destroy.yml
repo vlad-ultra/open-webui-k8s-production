@@ -31,6 +31,7 @@ jobs:
   backup:
     name: Backup Database (if cluster exists)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -136,6 +137,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: backup
     if: always()  # Run even if backup fails
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
