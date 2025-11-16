@@ -210,3 +210,40 @@ jobs:
           TF_VAR_cluster_name: ${{ env.CLUSTER_NAME }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
 
+      - name: Verify GKE destruction
+        run: |
+          echo "🔍 Verifying GKE cluster destruction..."
+          if gcloud container clusters describe ${{ env.CLUSTER_NAME }} --zone ${{ env.GCP_ZONE }} --project ${{ env.GCP_PROJECT_ID }} >/dev/null 2>&1; then
+            echo "❌ Cluster still exists"
+            echo "GKE_DESTROYED=false" >> $GITHUB_ENV
+          else
+            echo "✅ Cluster destroyed"
+            echo "GKE_DESTROYED=true" >> $GITHUB_ENV
+          fi
+          
+          # Verify static IP remains (should be preserved)
+          echo "🔍 Verifying static IP preservation..."
+          if gcloud compute addresses describe ${{
+            env.CLUSTER_NAME }}-ingress-ip --region=${{ env.GCP_REGION }} --project=${{ env.GCP_PROJECT_ID }} >/dev/null 2>&1; then
+            echo "📍 Static IP is preserved"
+            echo "IP_PRESERVED=true" >> $GITHUB_ENV
+          else
+            echo "⚠️  Static IP not found (expected to be preserved)"
+            echo "IP_PRESERVED=false" >> $GITHUB_ENV
+          fi
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+
+      - name: Display destruction results
+        run: |
+          echo "💥 Destruction Completed"
+          echo "========================"
+          echo "GKE destroyed: ${GKE_DESTROYED:-unknown}"
+          echo "Static IP preserved: ${IP_PRESERVED:-unknown}"
+          
+          if [ "${GKE_DESTROYED}" != "true" ]; then
+            echo "Some resources may still exist. Check Terraform logs above."
+            exit 1
+          fi
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
