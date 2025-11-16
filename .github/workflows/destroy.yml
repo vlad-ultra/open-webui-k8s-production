@@ -72,6 +72,10 @@ jobs:
           mkdir -p backups
           
           # Get pod name
+          echo "Waiting for pod to be Ready (up to 180s)..."
+          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=open-webui -n ${{ env.NAMESPACE }} --timeout=180s || echo "Pod not Ready within timeout"
+          
+          echo "Resolving pod name..."
           POD_NAME=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app.kubernetes.io/name=open-webui -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
           
           if [ -n "$POD_NAME" ]; then
@@ -82,9 +86,13 @@ jobs:
             if [ -n "${{ env.BACKUP_BUCKET }}" ]; then
               echo " Uploading backup to GCS..."
               gsutil mb -p ${{ env.GCP_PROJECT_ID }} -l ${{ env.GCP_REGION }} gs://${{ env.BACKUP_BUCKET }} 2>/dev/null || true
-              gsutil cp backups/webui_backup_*.db gs://${{ env.BACKUP_BUCKET }}/latest.db
+              LATEST_FILE=$(ls -t backups/webui_backup_*.db | head -1)
+              echo " Latest local backup: $LATEST_FILE"
+              gsutil cp "$LATEST_FILE" gs://${{ env.BACKUP_BUCKET }}/latest.db
               gsutil cp backups/webui_backup_*.db gs://${{ env.BACKUP_BUCKET }}/backups/webui_backup_$(date +%Y%m%d_%H%M%S).db
               echo " Backup uploaded to gs://${{ env.BACKUP_BUCKET }}/latest.db"
+              echo " Verifying object metadata:"
+              gsutil stat gs://${{ env.BACKUP_BUCKET }}/latest.db || true
             fi
           else
             echo "Pod not found, skipping backup"
