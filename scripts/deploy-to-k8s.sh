@@ -216,8 +216,44 @@ else
     echo "   Namespace does not exist (Helm will create it with --create-namespace)"
 fi
 
-# Step 9: Deploy Open WebUI (with automatic backup restore via initContainer)
-echo "Step 9: Deploying Open WebUI..."
+# Step 9: Ensure application secret exists BEFORE Helm deploy (to avoid startup errors)
+echo "Step 9: Ensuring application secret exists before Helm deploy..."
+# Ensure base secret with WEBUI_SECRET_KEY
+if ! kubectl get secret open-webui-secrets -n "${NAMESPACE}" >/dev/null 2>&1; then
+    echo "   Creating base secret open-webui-secrets with WEBUI_SECRET_KEY..."
+    BASE_WEBUI_SECRET_KEY="${WEBUI_SECRET_KEY:-$(openssl rand -hex 32)}"
+    kubectl create secret generic open-webui-secrets \
+        --from-literal=WEBUI_SECRET_KEY="${BASE_WEBUI_SECRET_KEY}" \
+        -n "${NAMESPACE}" \
+        --dry-run=client -o yaml | kubectl apply -f - || true
+else
+    echo "   Base secret open-webui-secrets already exists"
+fi
+# If OpenRouter key is provided, ensure OPENAI_* keys are present now
+if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+    echo "   Setting OPENAI_API_KEY/OPENAI__API_KEY from OPENROUTER_API_KEY..."
+    kubectl patch secret open-webui-secrets -n "${NAMESPACE}" \
+      --type merge \
+      -p "$(cat <<PATCH
+{
+  "stringData": {
+    "OPENAI_API_KEY": "${OPENROUTER_API_KEY}",
+    "OPENAI__API_KEY": "${OPENROUTER_API_KEY}"
+  }
+}
+PATCH
+)" || {
+      kubectl create secret generic open-webui-secrets \
+        --from-literal=OPENAI_API_KEY="${OPENROUTER_API_KEY}" \
+        --from-literal=OPENAI__API_KEY="${OPENROUTER_API_KEY}" \
+        -n "${NAMESPACE}" \
+        --dry-run=client -o yaml | kubectl apply -f - || true
+    }
+fi
+echo ""
+
+# Step 10: Deploy Open WebUI (with automatic backup restore via initContainer)
+echo "Step 10: Deploying Open WebUI..."
 echo "   Installing/upgrading Open WebUI via Helm..."
 echo "   Note: Database will be automatically restored from backup via initContainer if enabled"
 
@@ -234,24 +270,18 @@ helm upgrade --install open-webui "${PROJECT_ROOT}/helm/open-webui" \
 echo "    Helm deployment command completed"
 echo ""
 
-# Step 10: Ensure required secrets exist (fallback for chart issues)
-echo "Step 10: Ensuring required secrets exist..."
-if ! kubectl get secret open-webui-secrets -n "${NAMESPACE}" >/dev/null 2>&1; then
-    echo "   Secret open-webui-secrets not found, creating fallback secret..."
-    FALLBACK_WEBUI_SECRET_KEY="${WEBUI_SECRET_KEY:-$(openssl rand -hex 32)}"
-    kubectl create secret generic open-webui-secrets \
-        --from-literal=WEBUI_SECRET_KEY="${FALLBACK_WEBUI_SECRET_KEY}" \
-        -n "${NAMESPACE}" \
-        --dry-run=client -o yaml | kubectl apply -f - || true
-    echo "    Secret open-webui-secrets ensured"
-else
-    echo "   Secret open-webui-secrets already exists"
-fi
+# Step 11: Ensure required secrets exist (fallback for chart issues) — kept as safety
+echo "Step 11: Ensuring required secrets exist (post-deploy safety)..."
+kubectl get secret open-webui-secrets -n "${NAMESPACE}" >/dev/null 2>&1 || {
+  echo "   Secret unexpectedly missing; creating fallback..."
+  FALLBACK_WEBUI_SECRET_KEY="${WEBUI_SECRET_KEY:-$(openssl rand -hex 32)}"
+  kubectl create secret generic open-webui-secrets \
+      --from-literal=WEBUI_SECRET_KEY="${FALLBACK_WEBUI_SECRET_KEY}" \
+      -n "${NAMESPACE}" \
+      --dry-run=client -o yaml | kubectl apply -f - || true
+}
 if [ -n "${OPENROUTER_API_KEY:-}" ]; then
-    echo "   Ensuring OPENAI_API_KEY and OPENAI__API_KEY are set from OPENROUTER_API_KEY..."
-    kubectl patch secret open-webui-secrets -n "${NAMESPACE}" \
-      --type merge \
-      -p "$(cat <<PATCH
+  kubectl patch secret open-webui-secrets -n "${NAMESPACE}" --type merge -p "$(cat <<PATCH
 {
   "stringData": {
     "OPENAI_API_KEY": "${OPENROUTER_API_KEY}",
@@ -259,19 +289,12 @@ if [ -n "${OPENROUTER_API_KEY:-}" ]; then
   }
 }
 PATCH
-)" || {
-      echo "   Patch failed, applying via kubectl apply ..."
-      kubectl create secret generic open-webui-secrets \
-        --from-literal=OPENAI_API_KEY="${OPENROUTER_API_KEY}" \
-        --from-literal=OPENAI__API_KEY="${OPENROUTER_API_KEY}" \
-        -n "${NAMESPACE}" \
-        --dry-run=client -o yaml | kubectl apply -f - || true
-    }
+)" || true
 fi
 echo ""
 
-# Step 11: Ensure only 1 replica and no HPA (do this quickly, don't wait)
-echo "Step 11: Ensuring single pod configuration..."
+# Step 12: Ensure only 1 replica and no HPA (do this quickly, don't wait)
+echo "Step 12: Ensuring single pod configuration..."
 echo "   Checking for HPA..."
 if kubectl get hpa open-webui -n "${NAMESPACE}" 2>/dev/null; then
     echo "   Deleting HPA (autoscaling disabled)..."
@@ -285,7 +308,7 @@ echo "    Single pod configuration ensured"
 echo ""
 
 # Step 11: Check pod status (non-blocking)
-echo "Step 12: Checking pod status..."
+echo "Step 13: Checking pod status..."
 echo "   Waiting for rollout to complete (with timeout)..."
 if kubectl rollout status deployment/open-webui -n "${NAMESPACE}" --timeout=180s 2>/dev/null; then
     echo "    Pod is ready"
@@ -297,8 +320,8 @@ else
 fi
 echo ""
 
-# Step 12: Verify database restore (restore happens automatically via initContainer)
-echo "Step 13: Verifying database restore..."
+# Step 14: Verify database restore (restore happens automatically via initContainer)
+echo "Step 14: Verifying database restore..."
 echo "   Note: Database restore happens automatically via initContainer during pod startup"
 echo "   Checking if database was restored..."
 
