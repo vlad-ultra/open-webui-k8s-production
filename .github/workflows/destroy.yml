@@ -71,6 +71,14 @@ jobs:
           # Create backup directory
           mkdir -p backups
           
+          echo "Checking current state of gs://${{ env.BACKUP_BUCKET }}/latest.db ..."
+          if gsutil -q stat gs://${{ env.BACKUP_BUCKET }}/latest.db; then
+            echo "BEFORE latest.db:"
+            gsutil stat gs://${{ env.BACKUP_BUCKET }}/latest.db | sed -n -e 's/^\\s\\{4\\}Update time:\\s\\{12\\}//p' -e 's/^\\s\\{4\\}Content-Length:\\s\\{9\\}/Size: /p'
+          else
+            echo "latest.db does not exist yet"
+          fi
+          
           # Get pod name
           echo "Waiting for pod to be Ready (up to 180s)..."
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=open-webui -n ${{ env.NAMESPACE }} --timeout=180s || echo "Pod not Ready within timeout"
@@ -91,8 +99,8 @@ jobs:
               gsutil cp "$LATEST_FILE" gs://${{ env.BACKUP_BUCKET }}/latest.db
               gsutil cp backups/webui_backup_*.db gs://${{ env.BACKUP_BUCKET }}/backups/webui_backup_$(date +%Y%m%d_%H%M%S).db
               echo " Backup uploaded to gs://${{ env.BACKUP_BUCKET }}/latest.db"
-              echo " Verifying object metadata:"
-              gsutil stat gs://${{ env.BACKUP_BUCKET }}/latest.db || true
+              echo "AFTER latest.db:"
+              gsutil stat gs://${{ env.BACKUP_BUCKET }}/latest.db | sed -n -e 's/^\\s\\{4\\}Update time:\\s\\{12\\}//p' -e 's/^\\s\\{4\\}Content-Length:\\s\\{9\\}/Size: /p'
             fi
           else
             echo "Pod not found, skipping backup"
