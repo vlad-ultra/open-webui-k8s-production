@@ -172,19 +172,39 @@ jobs:
           TF_VAR_cluster_name: ${{ env.CLUSTER_NAME }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
 
-      - name: Destroy Infrastructure
+      - name: Terraform destroy (preserve IP)
+        if: ${{ github.event.inputs.preserve_ip == 'true' }}
+        working-directory: terraform
         run: |
-          chmod +x ./scripts/destroy-infra.sh
-          TF_VAR_project_id=${{ env.GCP_PROJECT_ID }} \
-          TF_VAR_region=${{ env.GCP_REGION }} \
-          TF_VAR_zone=${{ env.GCP_ZONE }} \
-          TF_VAR_cluster_name=${{ env.CLUSTER_NAME }} \
-          GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }} \
-          GCP_REGION=${{ env.GCP_REGION }} \
-          GCP_ZONE=${{ env.GCP_ZONE }} \
-          CLUSTER_NAME=${{ env.CLUSTER_NAME }} \
-          PRESERVE_IP=${{ github.event.inputs.preserve_ip }} \
-          ./scripts/destroy-infra.sh
+          echo "Destroying cluster and related resources while preserving static IP ..."
+          terraform destroy -auto-approve \
+            -target=google_container_node_pool.primary \
+            -target=google_container_cluster.cluster \
+            -target=google_project_service.apis
         env:
+          TF_VAR_project_id: ${{ env.GCP_PROJECT_ID }}
+          TF_VAR_region: ${{ env.GCP_REGION }}
+          TF_VAR_zone: ${{ env.GCP_ZONE }}
+          TF_VAR_cluster_name: ${{ env.CLUSTER_NAME }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+
+      - name: Terraform destroy (attempt full)
+        if: ${{ github.event.inputs.preserve_ip == 'false' }}
+        working-directory: terraform
+        run: |
+          echo "Attempting full terraform destroy ..."
+          echo "Note: IP has lifecycle.prevent_destroy=true and will block deletion unless code is changed."
+          terraform destroy -auto-approve || {
+            echo "Full destroy failed (likely due to prevent_destroy on IP). Destroying other resources while preserving IP ..."
+            terraform destroy -auto-approve \
+              -target=google_container_node_pool.primary \
+              -target=google_container_cluster.cluster \
+              -target=google_project_service.apis
+          }
+        env:
+          TF_VAR_project_id: ${{ env.GCP_PROJECT_ID }}
+          TF_VAR_region: ${{ env.GCP_REGION }}
+          TF_VAR_zone: ${{ env.GCP_ZONE }}
+          TF_VAR_cluster_name: ${{ env.CLUSTER_NAME }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
 
