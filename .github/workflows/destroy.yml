@@ -113,6 +113,19 @@ jobs:
           name: database-backup
           path: backups/*.db
           retention-days: 30
+      
+      - name: Final status — database backup in GCS
+        if: steps.check_cluster.outputs.cluster_exists == 'true'
+        run: |
+          echo "Verifying database backup in gs://${{ env.BACKUP_BUCKET }}/latest.db ..."
+          if gsutil -q stat gs://${{ env.BACKUP_BUCKET }}/latest.db; then
+            echo "✅ Database backup deployed to gs://${{ env.BACKUP_BUCKET }}/latest.db"
+            echo "Details:"
+            gsutil stat gs://${{ env.BACKUP_BUCKET }}/latest.db | sed -n -e 's/^\s\{4\}Update time:\s\{12\}/Updated: /p' -e 's/^\s\{4\}Content-Length:\s\{9\}/Size: /p'
+          else
+            echo "❌ Database backup NOT found in gs://${{ env.BACKUP_BUCKET }}/latest.db"
+            exit 1
+          fi
 
   destroy:
     name: Destroy Infrastructure
