@@ -95,7 +95,6 @@ jobs:
           BACKUP_BUCKET=${{ env.BACKUP_BUCKET }} \
           DOMAIN=${{ env.DOMAIN }} \
           OPENROUTER_API_KEY=${{ env.OPENROUTER_API_KEY }} \
-          GCP_SA_KEY="${{ secrets.GCP_SA_KEY }}" \
           ./scripts/deploy-to-k8s.sh
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
