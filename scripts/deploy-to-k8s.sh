@@ -252,21 +252,8 @@ PATCH
 fi
 echo ""
 
-# Step 10: Override image from custom registry if provided
-echo "Step 10: Setting custom image (if provided)..."
-if [ -n "${CUSTOM_IMAGE_REPO:-}" ]; then
-    echo "   Using custom image repository: ${CUSTOM_IMAGE_REPO}"
-    sed -i.bak "s|repository: .*|repository: ${CUSTOM_IMAGE_REPO}|g" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local"
-fi
-if [ -n "${CUSTOM_IMAGE_TAG:-}" ]; then
-    echo "   Using custom image tag: ${CUSTOM_IMAGE_TAG}"
-    sed -i.bak "s|tag: .*|tag: ${CUSTOM_IMAGE_TAG}|g" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local"
-fi
-rm -f "${PROJECT_ROOT}/helm/open-webui/values.yaml.local.bak"
-echo ""
-
-# Step 11: Deploy Open WebUI (with automatic backup restore via initContainer)
-echo "Step 11: Deploying Open WebUI..."
+# Step 10: Deploy Open WebUI (with automatic backup restore via initContainer)
+echo "Step 10: Deploying Open WebUI..."
 echo "   Installing/upgrading Open WebUI via Helm..."
 echo "   Note: Database will be automatically restored from backup via initContainer if enabled"
 
@@ -283,8 +270,8 @@ helm upgrade --install open-webui "${PROJECT_ROOT}/helm/open-webui" \
 echo "    Helm deployment command completed"
 echo ""
 
-# Step 12: Ensure required secrets exist (fallback for chart issues) — kept as safety
-echo "Step 12: Ensuring required secrets exist (post-deploy safety)..."
+# Step 11: Ensure required secrets exist (fallback for chart issues) — kept as safety
+echo "Step 11: Ensuring required secrets exist (post-deploy safety)..."
 kubectl get secret open-webui-secrets -n "${NAMESPACE}" >/dev/null 2>&1 || {
   echo "   Secret unexpectedly missing; creating fallback..."
   FALLBACK_WEBUI_SECRET_KEY="${WEBUI_SECRET_KEY:-$(openssl rand -hex 32)}"
@@ -306,8 +293,8 @@ PATCH
 fi
 echo ""
 
-# Step 13: Ensure only 1 replica and no HPA (do this quickly, don't wait)
-echo "Step 13: Ensuring single pod configuration..."
+# Step 12: Ensure only 1 replica and no HPA (do this quickly, don't wait)
+echo "Step 12: Ensuring single pod configuration..."
 echo "   Checking for HPA..."
 if kubectl get hpa open-webui -n "${NAMESPACE}" 2>/dev/null; then
     echo "   Deleting HPA (autoscaling disabled)..."
