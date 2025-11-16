@@ -29,7 +29,7 @@ jobs:
   deploy:
     name: Deploy Infrastructure and Application
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
