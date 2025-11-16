@@ -128,6 +128,18 @@ jobs:
         with:
           terraform_version: 1.5.0
 
+      - name: Refresh Terraform state (refresh-only)
+        working-directory: terraform
+        run: |
+          terraform init
+          terraform apply -refresh-only -auto-approve
+        env:
+          TF_VAR_project_id: ${{ env.GCP_PROJECT_ID }}
+          TF_VAR_region: ${{ env.GCP_REGION }}
+          TF_VAR_zone: ${{ env.GCP_ZONE }}
+          TF_VAR_cluster_name: ${{ env.CLUSTER_NAME }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+
       - name: Initialize Terraform
         working-directory: terraform
         run: |
