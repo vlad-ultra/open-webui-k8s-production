@@ -46,6 +46,7 @@ if ! gcloud container clusters describe "${CLUSTER_NAME}" \
     exit 1
 fi
 
+export USE_GKE_GCLOUD_AUTH_PLUGIN=True
 gcloud container clusters get-credentials "${CLUSTER_NAME}" \
     --zone "${GCP_ZONE}" \
     --project "${GCP_PROJECT_ID}"
@@ -55,7 +56,17 @@ echo ""
 
 # Step 2: Check cluster status
 echo "Step 2: Checking cluster status..."
-kubectl cluster-info
+ATTEMPTS=12
+SLEEP=10
+for i in $(seq 1 ${ATTEMPTS}); do
+    if kubectl cluster-info >/dev/null 2>&1; then
+        echo "   Cluster credentials configured"
+        break
+    fi
+    echo "   Waiting for API server to become reachable (${i}/${ATTEMPTS})..."
+    sleep ${SLEEP}
+done
+kubectl cluster-info || { echo "   Error: Kubernetes API not reachable"; exit 1; }
 echo "   Cluster credentials configured"
 echo ""
 
@@ -254,12 +265,14 @@ echo ""
 
 # Step 11: Check pod status (non-blocking)
 echo "Step 12: Checking pod status..."
-echo "   Waiting for pod to be ready (with timeout)..."
-if kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=open-webui -n "${NAMESPACE}" --timeout=60s 2>/dev/null; then
+echo "   Waiting for rollout to complete (with timeout)..."
+if kubectl rollout status deployment/open-webui -n "${NAMESPACE}" --timeout=180s 2>/dev/null; then
     echo "    Pod is ready"
 else
-    echo "    Pod is still starting (this is normal, it may take a few minutes)"
-    echo "   You can check status with: kubectl get pods -n ${NAMESPACE}"
+    echo "    Pod is still starting or rollout pending. Describing resources..."
+    kubectl get pods -n "${NAMESPACE}"
+    kubectl describe deploy/open-webui -n "${NAMESPACE}" || true
+    kubectl get events -n "${NAMESPACE}" --sort-by=.lastTimestamp | tail -n 50 || true
 fi
 echo ""
 
