@@ -8,7 +8,7 @@ metadata:
 spec:
   replicas: {{ .Values.replicaCount }}
   strategy:
-    {{- if eq .Values.replicaCount 1 }}
+    {{- if eq (int .Values.replicaCount) 1 }}
     type: Recreate  # Recreate strategy for single replica with ReadWriteOnce PVC
     {{- else }}
     type: RollingUpdate  # RollingUpdate for multiple replicas

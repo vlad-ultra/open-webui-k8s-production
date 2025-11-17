@@ -345,6 +345,11 @@ PATCH
         --dry-run=client -o yaml | kubectl apply -f - || true
     }
 fi
+
+echo "   Ensuring Helm metadata on open-webui-secrets..."
+kubectl label secret open-webui-secrets -n "${NAMESPACE}" app.kubernetes.io/managed-by=Helm --overwrite || true
+kubectl annotate secret open-webui-secrets -n "${NAMESPACE}" meta.helm.sh/release-name=open-webui --overwrite || true
+kubectl annotate secret open-webui-secrets -n "${NAMESPACE}" meta.helm.sh/release-namespace="${NAMESPACE}" --overwrite || true
 echo ""
 
 # Step 10: Check and migrate PVC if access mode changed (RWO -> RWX)

@@ -1,5 +1,9 @@
 name: Deploy Open WebUI to GKE
 
+concurrency:
+  group: gke-open-webui-deploy
+  cancel-in-progress: true
+
 on:
   push:
     branches:
@@ -62,17 +66,17 @@ jobs:
       - name: Deploy Infrastructure
         run: |
           chmod +x ./scripts/deploy-infra.sh
-          TF_VAR_project_id=${{ env.GCP_PROJECT_ID }} \
-          TF_VAR_region=${{ env.GCP_REGION }} \
-          TF_VAR_zone=${{ env.GCP_ZONE }} \
-          TF_VAR_cluster_name=${{ env.CLUSTER_NAME }} \
-          GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }} \
-          GCP_REGION=${{ env.GCP_REGION }} \
-          GCP_ZONE=${{ env.GCP_ZONE }} \
-          CLUSTER_NAME=${{ env.CLUSTER_NAME }} \
           ./scripts/deploy-infra.sh
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+          TF_VAR_project_id: ${{ env.GCP_PROJECT_ID }}
+          TF_VAR_region: ${{ env.GCP_REGION }}
+          TF_VAR_zone: ${{ env.GCP_ZONE }}
+          TF_VAR_cluster_name: ${{ env.CLUSTER_NAME }}
+          GCP_PROJECT_ID: ${{ env.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ env.GCP_REGION }}
+          GCP_ZONE: ${{ env.GCP_ZONE }}
+          CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
 
   deploy-app-to-kubernetes:
     name: Deploy app To Kubernetes
@@ -128,7 +132,38 @@ jobs:
           echo "OPENROUTER_API_KEY is set: $([ -n \"${OPENROUTER_API_KEY}\" ] && echo 'yes' || echo 'no')"
           echo "GCP_SA_KEY is set: $([ -n \"${GCP_SA_KEY}\" ] && echo 'yes' || echo 'no')"
           
+          # Run deployment script and capture output
+          set +e  # Don't exit on error, we want to capture diagnostics
           ./scripts/deploy-to-k8s.sh
+          DEPLOY_EXIT_CODE=$?
+          set -e
+          
+          if [ $DEPLOY_EXIT_CODE -ne 0 ]; then
+            echo "=== Deployment script failed with exit code $DEPLOY_EXIT_CODE ==="
+            echo "=== Running diagnostics ==="
+            
+            export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+            gcloud container clusters get-credentials ${CLUSTER_NAME} \
+              --zone ${GCP_ZONE} \
+              --project ${GCP_PROJECT_ID}
+            
+            echo "=== Checking namespace ==="
+            kubectl get namespace ${NAMESPACE} || echo "Namespace not found"
+            
+            echo "=== Checking Helm releases ==="
+            helm list -n ${NAMESPACE} || echo "No Helm releases"
+            
+            echo "=== Checking PVC ==="
+            kubectl get pvc -n ${NAMESPACE} || echo "No PVCs"
+            
+            echo "=== Checking pods ==="
+            kubectl get pods -n ${NAMESPACE} || echo "No pods"
+            
+            echo "=== Checking events ==="
+            kubectl get events -n ${NAMESPACE} --sort-by=.lastTimestamp | tail -n 20 || echo "No events"
+            
+            exit $DEPLOY_EXIT_CODE
+          fi
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
           USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
