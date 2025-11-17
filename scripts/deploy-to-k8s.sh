@@ -421,11 +421,24 @@ if [ -n "${EXISTING_PVC_ACCESS_MODE}" ] && [ "${EXISTING_PVC_ACCESS_MODE}" != "$
     }
     echo "   Old PVC deleted. New PVC will be created by Helm with access mode '${DESIRED_ACCESS_MODE}'"
     echo "   Data will be automatically restored from backup via initContainer"
+    echo "   Note: Helm will create new PVC automatically during deployment"
 else
     if [ -n "${EXISTING_PVC_ACCESS_MODE}" ]; then
         echo "   PVC '${PVC_NAME}' exists with access mode '${EXISTING_PVC_ACCESS_MODE}' (matches desired mode '${DESIRED_ACCESS_MODE}')"
     else
         echo "   PVC does not exist yet (will be created by Helm with access mode '${DESIRED_ACCESS_MODE}')"
+        echo "   Verifying storage class is configured correctly..."
+        STORAGE_CLASS_IN_VALUES=$(grep "^[[:space:]]*storageClass:" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local" 2>/dev/null | head -1 | sed 's/.*storageClass:[[:space:]]*\([^#]*\).*/\1/' | tr -d '"' | tr -d ' ' || echo "")
+        if [ -z "${STORAGE_CLASS_IN_VALUES}" ] || [ "${STORAGE_CLASS_IN_VALUES}" = '""' ]; then
+            echo "   Warning: storageClass is empty in values.yaml.local"
+            echo "   For ReadWriteMany, storageClass should be 'nfs-client'"
+            echo "   Checking if NFS provisioner is available..."
+            if kubectl get storageclass nfs-client >/dev/null 2>&1; then
+                echo "   NFS storage class exists. PVC should be created correctly by Helm."
+            else
+                echo "   Error: NFS storage class not found. PVC creation may fail."
+            fi
+        fi
     fi
 fi
 echo ""

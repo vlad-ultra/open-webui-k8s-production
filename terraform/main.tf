@@ -42,7 +42,7 @@ resource "google_container_node_pool" "primary" {
   node_count = var.node_count
 
   node_config {
-    machine_type = "e2-medium"  # 2 CPU, 4 GB RAM - optimized for cost savings
+    machine_type = "e2-standard-4"  # 4 CPU, 16 GB RAM - increased for 3 replicas
     disk_size_gb = 20
     disk_type    = "pd-standard"
 
