@@ -144,6 +144,47 @@ clear_helm_pending() {
     fi
 }
 
+migrate_pvc() {
+    local REASON="$1"
+    if [ -z "${PVC_NAME:-}" ]; then
+        PVC_NAME="open-webui-pvc"
+    fi
+    echo "   WARNING: PVC '${PVC_NAME}' needs to be recreated (${REASON})"
+    echo "   This will:"
+    echo "     1. Scale down deployment to 0 replicas"
+    echo "     2. Delete old PVC (data will be restored from backup)"
+    echo "     3. Allow Helm to create new PVC with correct specification"
+    echo "     4. Restore data automatically via initContainer"
+    
+    if kubectl get deployment open-webui -n "${NAMESPACE}" >/dev/null 2>&1; then
+        echo "   Scaling down deployment..."
+        kubectl scale deployment open-webui -n "${NAMESPACE}" --replicas=0
+        echo "   Waiting for pods to terminate..."
+        sleep 15
+        while kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/name=open-webui --no-headers 2>/dev/null | grep -v "No resources" | grep -q .; do
+            echo "   Still waiting for pods to terminate..."
+            sleep 5
+        done
+    fi
+    
+    echo "   Deleting old PVC '${PVC_NAME}'..."
+    kubectl delete pvc "${PVC_NAME}" -n "${NAMESPACE}" --wait=true || {
+        echo "   Warning: Failed to delete PVC. It may be in use. Trying force delete..."
+        kubectl get pods -n "${NAMESPACE}" -o json | jq -r '.items[] | select(.spec.volumes[]?.persistentVolumeClaim?.claimName=="'${PVC_NAME}'") | .metadata.name' | while read pod; do
+            if [ -n "${pod}" ]; then
+                echo "   Force deleting pod ${pod} that may be using PVC..."
+                kubectl delete pod "${pod}" -n "${NAMESPACE}" --force --grace-period=0 2>/dev/null || true
+            fi
+        done
+        sleep 5
+        kubectl delete pvc "${PVC_NAME}" -n "${NAMESPACE}" --wait=true || {
+            echo "   Error: Could not delete PVC. Manual intervention may be required."
+        }
+    }
+    echo "   Old PVC deleted. Helm will create a new PVC (access mode '${DESIRED_ACCESS_MODE}')"
+    echo "   Data will be restored from backup automatically."
+}
+
 echo "   Installing NGINX Ingress with static IP: ${INGRESS_IP}..."
 # Try to install/upgrade with retry logic
 MAX_RETRIES=3
@@ -362,11 +403,20 @@ if [ -z "${PVC_NAME}" ]; then
 fi
 EXISTING_PVC_ACCESS_MODE=$(kubectl get pvc "${PVC_NAME}" -n "${NAMESPACE}" -o jsonpath='{.spec.accessModes[0]}' 2>/dev/null || echo "")
 DESIRED_ACCESS_MODE=$(grep "^[[:space:]]*accessMode:" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local" | head -1 | sed 's/.*accessMode:[[:space:]]*\([^#]*\).*/\1/' | tr -d '"' | tr -d ' ' || echo "ReadWriteMany")
+DESIRED_STORAGE_CLASS=$(grep "^[[:space:]]*storageClass:" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local" | head -1 | sed 's/.*storageClass:[[:space:]]*\([^#]*\).*/\1/' | tr -d '"' | tr -d ' ')
+DESIRED_STORAGE_CLASS=${DESIRED_STORAGE_CLASS:-}
+EXISTING_STORAGE_CLASS=$(kubectl get pvc "${PVC_NAME}" -n "${NAMESPACE}" -o jsonpath='{.spec.storageClassName}' 2>/dev/null || echo "")
+
+mismatch_reason=""
+if [ -n "${EXISTING_PVC_ACCESS_MODE}" ] && [ "${EXISTING_PVC_ACCESS_MODE}" != "${DESIRED_ACCESS_MODE}" ]; then
+    mismatch_reason="access mode mismatch (current: ${EXISTING_PVC_ACCESS_MODE}, desired: ${DESIRED_ACCESS_MODE})"
+elif [ -n "${EXISTING_STORAGE_CLASS}" ] && [ -n "${DESIRED_STORAGE_CLASS}" ] && [ "${DESIRED_STORAGE_CLASS}" != "${EXISTING_STORAGE_CLASS}" ]; then
+    mismatch_reason="storage class mismatch (current: ${EXISTING_STORAGE_CLASS}, desired: ${DESIRED_STORAGE_CLASS})"
+fi
 
 # Check if ReadWriteMany is requested and verify storage class compatibility
 if [ "${DESIRED_ACCESS_MODE}" = "ReadWriteMany" ]; then
-    STORAGE_CLASS=$(grep "^[[:space:]]*storageClass:" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local" | head -1 | sed 's/.*storageClass:[[:space:]]*\([^#]*\).*/\1/' | tr -d '"' | tr -d ' ' || echo "")
-    if [ -z "${STORAGE_CLASS}" ] || [ "${STORAGE_CLASS}" = '""' ]; then
+    if [ -z "${DESIRED_STORAGE_CLASS}" ] || [ "${DESIRED_STORAGE_CLASS}" = '""' ]; then
         DEFAULT_STORAGE_CLASS=$(kubectl get storageclass -o jsonpath='{.items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")].metadata.name}' 2>/dev/null || echo "")
         if [ -n "${DEFAULT_STORAGE_CLASS}" ]; then
             echo "   Warning: ReadWriteMany requested but using default storage class '${DEFAULT_STORAGE_CLASS}'"
@@ -374,7 +424,7 @@ if [ "${DESIRED_ACCESS_MODE}" = "ReadWriteMany" ]; then
             echo "   NFS provisioner should be installed automatically in Step 5.5"
             echo "   If PVC creation fails, check if NFS provisioner is installed: kubectl get storageclass nfs-client"
         fi
-    elif [ "${STORAGE_CLASS}" = "nfs-client" ]; then
+    elif [ "${DESIRED_STORAGE_CLASS}" = "nfs-client" ]; then
         if ! kubectl get storageclass nfs-client >/dev/null 2>&1; then
             echo "   Warning: Storage class 'nfs-client' requested but not found"
             echo "   NFS provisioner should be installed automatically in Step 5.5"
@@ -385,56 +435,15 @@ if [ "${DESIRED_ACCESS_MODE}" = "ReadWriteMany" ]; then
     fi
 fi
 
-if [ -n "${EXISTING_PVC_ACCESS_MODE}" ] && [ "${EXISTING_PVC_ACCESS_MODE}" != "${DESIRED_ACCESS_MODE}" ]; then
-    echo "   WARNING: PVC '${PVC_NAME}' exists with access mode '${EXISTING_PVC_ACCESS_MODE}' but desired mode is '${DESIRED_ACCESS_MODE}'"
-    echo "   PVC access mode cannot be changed after creation. Migrating PVC..."
-    echo "   This will:"
-    echo "     1. Scale down deployment to 0 replicas"
-    echo "     2. Delete old PVC (data will be restored from backup)"
-    echo "     3. Allow Helm to create new PVC with correct access mode"
-    echo "     4. Restore data automatically via initContainer"
-    
-    # Scale down deployment if exists
-    if kubectl get deployment open-webui -n "${NAMESPACE}" >/dev/null 2>&1; then
-        echo "   Scaling down deployment..."
-        kubectl scale deployment open-webui -n "${NAMESPACE}" --replicas=0
-        echo "   Waiting for pods to terminate..."
-        sleep 15
-        # Wait for all pods to actually terminate
-        while kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/name=open-webui --no-headers 2>/dev/null | grep -v "No resources" | grep -q .; do
-            echo "   Still waiting for pods to terminate..."
-            sleep 5
-        done
-    fi
-    
-    # Delete old PVC
-    echo "   Deleting old PVC '${PVC_NAME}'..."
-    kubectl delete pvc "${PVC_NAME}" -n "${NAMESPACE}" --wait=true || {
-        echo "   Warning: Failed to delete PVC. It may be in use. Trying force delete..."
-        # Try to find and delete any pods still using the PVC
-        kubectl get pods -n "${NAMESPACE}" -o json | jq -r '.items[] | select(.spec.volumes[]?.persistentVolumeClaim?.claimName=="'${PVC_NAME}'") | .metadata.name' | while read pod; do
-            if [ -n "${pod}" ]; then
-                echo "   Force deleting pod ${pod} that may be using PVC..."
-                kubectl delete pod "${pod}" -n "${NAMESPACE}" --force --grace-period=0 2>/dev/null || true
-            fi
-        done
-        sleep 5
-        kubectl delete pvc "${PVC_NAME}" -n "${NAMESPACE}" --wait=true || {
-            echo "   Error: Could not delete PVC. Manual intervention may be required."
-            echo "   You may need to manually delete the PVC after ensuring no pods are using it."
-        }
-    }
-    echo "   Old PVC deleted. New PVC will be created by Helm with access mode '${DESIRED_ACCESS_MODE}'"
-    echo "   Data will be automatically restored from backup via initContainer"
-    echo "   Note: Helm will create new PVC automatically during deployment"
+if [ -n "${mismatch_reason}" ]; then
+    migrate_pvc "existing spec differs from desired (${mismatch_reason})"
 else
     if [ -n "${EXISTING_PVC_ACCESS_MODE}" ]; then
         echo "   PVC '${PVC_NAME}' exists with access mode '${EXISTING_PVC_ACCESS_MODE}' (matches desired mode '${DESIRED_ACCESS_MODE}')"
     else
         echo "   PVC does not exist yet (will be created by Helm with access mode '${DESIRED_ACCESS_MODE}')"
         echo "   Verifying storage class is configured correctly..."
-        STORAGE_CLASS_IN_VALUES=$(grep "^[[:space:]]*storageClass:" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local" 2>/dev/null | head -1 | sed 's/.*storageClass:[[:space:]]*\([^#]*\).*/\1/' | tr -d '"' | tr -d ' ' || echo "")
-        if [ -z "${STORAGE_CLASS_IN_VALUES}" ] || [ "${STORAGE_CLASS_IN_VALUES}" = '""' ]; then
+        if [ -z "${DESIRED_STORAGE_CLASS}" ] || [ "${DESIRED_STORAGE_CLASS}" = '""' ]; then
             echo "   Warning: storageClass is empty in values.yaml.local"
             echo "   For ReadWriteMany, storageClass should be 'nfs-client'"
             echo "   Checking if NFS provisioner is available..."
@@ -461,16 +470,29 @@ echo "   Note: Deployment initiated, checking status..."
 # Try to install/upgrade with retry logic
 MAX_RETRIES=3
 RETRY_COUNT=0
+PVC_HELM_RETRY=false
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     if helm upgrade --install open-webui "${PROJECT_ROOT}/helm/open-webui" \
         -n "${NAMESPACE}" \
         -f "${PROJECT_ROOT}/helm/open-webui/values.yaml.local" \
         --create-namespace \
         --timeout 5m \
-        --force 2>&1 | tee /tmp/helm-webui-output.log; then
+        --atomic 2>&1 | tee /tmp/helm-webui-output.log; then
         echo "   Open WebUI deployed successfully"
         break
     else
+        if grep -q "PersistentVolumeClaim .*spec: Forbidden" /tmp/helm-webui-output.log 2>/dev/null; then
+            if [ "${PVC_HELM_RETRY}" = "true" ]; then
+                echo "   Error: PVC immutable spec issue persists after retry"
+                cat /tmp/helm-webui-output.log
+                exit 1
+            fi
+            PVC_HELM_RETRY=true
+            echo "   Detected immutable PVC spec error from Helm output"
+            migrate_pvc "Helm reported immutable PVC spec mismatch"
+            echo "   Retrying Helm deployment after recreating PVC..."
+            continue
+        fi
         if grep -q "another operation.*is in progress" /tmp/helm-webui-output.log 2>/dev/null; then
             RETRY_COUNT=$((RETRY_COUNT + 1))
             echo "   Warning: Detected pending Helm operation (attempt ${RETRY_COUNT}/${MAX_RETRIES})"
