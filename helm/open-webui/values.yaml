@@ -29,7 +29,7 @@ image:
 
 # Replica configuration
 # Using ReadWriteMany (RWX) storage to support multiple replicas
-replicaCount: 3
+replicaCount: 2
 
 # Resource limits and requests (optimized based on real-world usage)
 # Real usage: CPU: 6m, Memory: 618Mi

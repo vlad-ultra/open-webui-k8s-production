@@ -33,7 +33,7 @@ image:
 
 # Replica configuration
 # Using ReadWriteMany (RWX) storage to support multiple replicas
-replicaCount: 3
+replicaCount: 2
 
 # Resource limits and requests
 resources:
