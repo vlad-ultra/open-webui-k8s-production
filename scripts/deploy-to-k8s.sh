@@ -467,6 +467,20 @@ echo "   Note: Database will be automatically restored from backup via initConta
 echo "   Deploying with Helm (namespace will be created if needed)..."
 echo "   Note: Deployment initiated, checking status..."
 
+# Check if deployment exists and verify it's ready for rolling update
+if kubectl get deployment open-webui -n "${NAMESPACE}" >/dev/null 2>&1; then
+    CURRENT_REPLICAS=$(kubectl get deployment open-webui -n "${NAMESPACE}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+    echo "   Existing deployment found with ${CURRENT_REPLICAS} ready replicas"
+    echo "   Using rolling update strategy (zero downtime deployment)"
+    
+    # Verify PVC supports ReadWriteMany for multiple replicas
+    PVC_ACCESS_MODE=$(kubectl get pvc open-webui-pvc -n "${NAMESPACE}" -o jsonpath='{.spec.accessModes[0]}' 2>/dev/null || echo "")
+    if [ "${PVC_ACCESS_MODE}" != "ReadWriteMany" ] && [ "${CURRENT_REPLICAS}" -gt 1 ]; then
+        echo "   Warning: PVC access mode is '${PVC_ACCESS_MODE}' but ${CURRENT_REPLICAS} replicas exist"
+        echo "   Rolling update may fail with ReadWriteOnce PVC. Consider migrating to ReadWriteMany."
+    fi
+fi
+
 # Try to install/upgrade with retry logic
 MAX_RETRIES=3
 RETRY_COUNT=0
@@ -476,8 +490,9 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
         -n "${NAMESPACE}" \
         -f "${PROJECT_ROOT}/helm/open-webui/values.yaml.local" \
         --create-namespace \
-        --timeout 5m \
-        --atomic 2>&1 | tee /tmp/helm-webui-output.log; then
+        --timeout 10m \
+        --wait \
+        --wait-for-jobs 2>&1 | tee /tmp/helm-webui-output.log; then
         echo "   Open WebUI deployed successfully"
         break
     else
@@ -548,14 +563,36 @@ else
 fi
 echo ""
 
-# Step 14: Check pod status (non-blocking)
-echo "Step 14: Checking pod status..."
+# Step 14: Check pod status and ensure rollout completed
+echo "Step 14: Checking pod status and rollout completion..."
 echo "   Waiting for rollout to complete (with timeout)..."
-if kubectl rollout status deployment/open-webui -n "${NAMESPACE}" --timeout=180s 2>/dev/null; then
-    echo "    Pod is ready"
+if kubectl rollout status deployment/open-webui -n "${NAMESPACE}" --timeout=300s 2>/dev/null; then
+    echo "    Rollout completed successfully"
+    
+    # Verify all pods are from the new ReplicaSet
+    NEW_RS=$(kubectl get deployment open-webui -n "${NAMESPACE}" -o jsonpath='{.status.observedGeneration}' 2>/dev/null || echo "0")
+    ACTUAL_REPLICAS=$(kubectl get deployment open-webui -n "${NAMESPACE}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+    DESIRED_REPLICAS=$(kubectl get deployment open-webui -n "${NAMESPACE}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+    
+    echo "   Desired replicas: ${DESIRED_REPLICAS}, Ready replicas: ${ACTUAL_REPLICAS}"
+    
+    # Check for old ReplicaSets
+    OLD_RS_COUNT=$(kubectl get replicasets -n "${NAMESPACE}" -l app.kubernetes.io/name=open-webui --no-headers 2>/dev/null | awk '$2+$3+$4 > 0 {count++} END {print count+0}')
+    if [ "${OLD_RS_COUNT}" -gt 1 ]; then
+        echo "   Warning: Multiple ReplicaSets detected. Old pods may still be running."
+        kubectl get replicasets -n "${NAMESPACE}" -l app.kubernetes.io/name=open-webui
+        echo "   Cleaning up old ReplicaSets..."
+        kubectl delete replicaset -n "${NAMESPACE}" -l app.kubernetes.io/name=open-webui --field-selector=status.replicas=0 2>/dev/null || true
+    fi
+    
+    if [ "${ACTUAL_REPLICAS}" != "${DESIRED_REPLICAS}" ]; then
+        echo "   Warning: Replica count mismatch! Desired: ${DESIRED_REPLICAS}, Ready: ${ACTUAL_REPLICAS}"
+        echo "   Checking pod status..."
+        kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/name=open-webui
+    fi
 else
-    echo "    Pod is still starting or rollout pending. Describing resources..."
-    kubectl get pods -n "${NAMESPACE}"
+    echo "    Rollout did not complete within timeout. Checking status..."
+    kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/name=open-webui
     kubectl describe deploy/open-webui -n "${NAMESPACE}" || true
     kubectl get events -n "${NAMESPACE}" --sort-by=.lastTimestamp | tail -n 50 || true
 fi

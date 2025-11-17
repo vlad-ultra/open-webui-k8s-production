@@ -11,10 +11,10 @@ spec:
     {{- if eq (int .Values.replicaCount) 1 }}
     type: Recreate  # Recreate strategy for single replica with ReadWriteOnce PVC
     {{- else }}
-    type: RollingUpdate  # RollingUpdate for multiple replicas
+    type: RollingUpdate  # RollingUpdate for multiple replicas (zero downtime)
     rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+      maxSurge: 1  # Allow 1 extra pod during update
+      maxUnavailable: 1  # Allow 1 pod to be unavailable during update (enables graceful rolling)
     {{- end }}
   selector:
     matchLabels:
