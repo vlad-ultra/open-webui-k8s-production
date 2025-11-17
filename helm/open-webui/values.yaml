@@ -8,7 +8,7 @@ ingress:
   enabled: true
   className: nginx
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # cert-manager disabled - using manual TLS certificates from GCS
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
   hosts:
@@ -167,8 +167,8 @@ podAnnotations:
 # Pod security context
 podSecurityContext:
   fsGroup: 1000
-  runAsNonRoot: true
-  runAsUser: 1000
+  runAsNonRoot: false  # Allow running as root to fix static files permissions
+  runAsUser: 0  # Run as root to access static files in image layers
 
 # Container security context
 securityContext:
@@ -177,8 +177,8 @@ securityContext:
     drop:
     - ALL
   readOnlyRootFilesystem: false
-  runAsNonRoot: true
-  runAsUser: 1000
+  runAsNonRoot: false  # Allow running as root to fix static files permissions
+  runAsUser: 0  # Run as root to access static files in image layers
 
 # Node selector and tolerations
 nodeSelector: {}
