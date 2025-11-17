@@ -7,7 +7,7 @@
 # This script will:
 # 1. Get cluster credentials
 # 2. Install NGINX Ingress with static IP
-# 3. Install cert-manager
+# 3. Load SSL certificates from GCS bucket (cert-manager disabled)
 # 4. Deploy Open WebUI via Helm
 # 5. Restore database from backup (if exists)
 
@@ -246,27 +246,26 @@ fi
 echo "    NGINX Ingress installed with IP: ${INGRESS_IP}"
 echo ""
 
-# Step 5: Install cert-manager and create SSL certificate
-echo "Step 5: Installing cert-manager and setting up SSL certificate..."
-echo "   Applying cert-manager manifests..."
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
-echo "   Waiting for cert-manager pods to be ready..."
-kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=cert-manager -n cert-manager --timeout=300s
-echo "   Applying cluster issuer..."
-kubectl apply -f "${PROJECT_ROOT}/bootstrap/cluster-issuer.yaml"
+# Step 5: Load SSL certificates from GCS bucket
+echo "Step 5: Loading SSL certificates from GCS bucket..."
+echo "   Note: cert-manager is disabled - using manual certificates from GCS"
 
-# Check if TLS secret exists, if not create self-signed certificate from GCS bucket or local files
-if ! kubectl get secret "${SECRET_NAME:-open-webui-tls}" -n "${NAMESPACE}" > /dev/null 2>&1; then
-    echo "   TLS secret not found, creating from GCS bucket or local certificates..."
-    DOMAIN="${DOMAIN:-ai-k8s.svdevops.tech}"
-    BACKUP_BUCKET="${BACKUP_BUCKET:-open-webui-backups}"
-    BACKUP_BUCKET="${BACKUP_BUCKET}" \
-    "${PROJECT_ROOT}/scripts/create-self-signed-cert.sh" "${DOMAIN}" "${NAMESPACE}"
-else
-    echo "   TLS secret already exists in Kubernetes, skipping certificate creation"
+# Always load certificates from GCS bucket (never generate new ones)
+# Certificates are stored in gs://open-webui-backups/certs/ and reused
+DOMAIN="${DOMAIN:-ai-k8s.svdevops.tech}"
+BACKUP_BUCKET="${BACKUP_BUCKET:-open-webui-backups}"
+
+# Delete cert-manager Certificate resource if exists (we use manual certificates from GCS)
+if kubectl get certificate open-webui-tls -n "${NAMESPACE}" >/dev/null 2>&1; then
+    echo "   Removing cert-manager Certificate resource (using manual certificates from GCS)..."
+    kubectl delete certificate open-webui-tls -n "${NAMESPACE}" --ignore-not-found=true
 fi
 
-echo "   cert-manager installed and SSL certificate ready"
+# Always create/update secret from GCS bucket (will download existing Let's Encrypt certs or use local)
+BACKUP_BUCKET="${BACKUP_BUCKET}" \
+"${PROJECT_ROOT}/scripts/create-self-signed-cert.sh" "${DOMAIN}" "${NAMESPACE}"
+
+echo "   ✓ SSL certificates loaded from GCS bucket"
 echo ""
 
 # Step 5.5: Check if NFS provisioner is needed (optional - only if ReadWriteMany is required)

@@ -98,8 +98,8 @@ else
     echo "    Namespace ${NAMESPACE} already exists"
 fi
 
-# Create Kubernetes secret
-echo "   Creating Kubernetes secret: ${SECRET_NAME} in namespace ${NAMESPACE}..."
+# Create or update Kubernetes secret (always update to ensure fresh certs from GCS)
+echo "   Creating/updating Kubernetes secret: ${SECRET_NAME} in namespace ${NAMESPACE}..."
 kubectl create secret tls "${SECRET_NAME}" \
     --cert="${CERT_FILE_TO_USE}" \
     --key="${KEY_FILE_TO_USE}" \
@@ -107,22 +107,25 @@ kubectl create secret tls "${SECRET_NAME}" \
     --dry-run=client -o yaml | kubectl apply -f -
 
 echo ""
-echo " Self-signed certificate created and saved to Kubernetes secret!"
+echo " ✓ SSL certificate loaded and saved to Kubernetes secret!"
 echo ""
 echo "Certificate details:"
 echo "   Domain: ${DOMAIN}"
 echo "   Secret: ${SECRET_NAME} (namespace: ${NAMESPACE})"
-echo "   Valid for: 365 days"
-echo "   Files saved in: ${CERTS_DIR}/"
-echo "   - Certificate: ${CERT_FILE_TO_USE}"
-echo "   - Private key: ${KEY_FILE_TO_USE}"
+echo "   Source: ${CERT_FILE_TO_USE}"
 echo ""
-echo "  Note: Browsers will show security warning for self-signed certificate"
-echo "   This is normal - you can proceed by accepting the certificate"
+# Check if certificate is Let's Encrypt or self-signed
+CERT_ISSUER=$(openssl x509 -in "${CERT_FILE_TO_USE}" -noout -issuer 2>/dev/null | sed 's/issuer= //' || echo "")
+if echo "${CERT_ISSUER}" | grep -q "Let's Encrypt\|R3\|X3"; then
+    echo "   Certificate type: Let's Encrypt"
+elif echo "${CERT_ISSUER}" | grep -q "^/CN=${DOMAIN}"; then
+    echo "   Certificate type: Self-signed"
+else
+    echo "   Certificate type: ${CERT_ISSUER}"
+fi
 echo ""
-echo " Certificates are saved in:"
-echo "   - Local: ${CERTS_DIR}/"
+echo " Certificates loaded from:"
 echo "   - GCS: ${GCS_CERTS_PATH}/"
+echo "   - Local: ${CERTS_DIR}/"
 echo "   They will be reused on next deployment from GCS bucket"
-echo "   To regenerate: delete files from GCS bucket and local directory, then run this script again"
 
