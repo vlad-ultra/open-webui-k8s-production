@@ -185,20 +185,43 @@ migrate_pvc() {
     echo "   Data will be restored from backup automatically."
 }
 
-echo "   Installing NGINX Ingress with static IP: ${INGRESS_IP}..."
+echo "   Installing/upgrading NGINX Ingress with static IP: ${INGRESS_IP}..."
+# Check if ingress-nginx already exists
+INGRESS_EXISTS=$(helm list -n ingress-nginx --filter ingress-nginx -q 2>/dev/null || echo "")
+if [ -n "${INGRESS_EXISTS}" ]; then
+    echo "   NGINX Ingress already installed, upgrading only if needed (no downtime)..."
+    # Use --reuse-values to preserve existing configuration and avoid downtime
+    UPGRADE_STRATEGY="--reuse-values"
+else
+    echo "   Installing NGINX Ingress for the first time..."
+    UPGRADE_STRATEGY=""
+fi
+
 # Try to install/upgrade with retry logic
 MAX_RETRIES=3
 RETRY_COUNT=0
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    if helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+    # Only set loadBalancerIP if not reusing values (to avoid IP change)
+    if [ -z "${UPGRADE_STRATEGY}" ]; then
+        HELM_CMD="helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
         --namespace ingress-nginx \
         --create-namespace \
         --set controller.service.type=LoadBalancer \
-        --set controller.service.annotations."cloud\.google\.com/load-balancer-type"="External" \
-        --set controller.service.loadBalancerIP="${INGRESS_IP}" \
-        --wait \
-        --force 2>&1 | tee /tmp/helm-output.log; then
-        echo "   NGINX Ingress installed successfully"
+        --set controller.service.annotations.\"cloud\.google\.com/load-balancer-type\"=\"External\" \
+        --set controller.service.loadBalancerIP=\"${INGRESS_IP}\" \
+        --wait"
+    else
+        # When reusing values, only ensure IP is set if not already configured
+        HELM_CMD="helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+        --namespace ingress-nginx \
+        --create-namespace \
+        --reuse-values \
+        --set controller.service.loadBalancerIP=\"${INGRESS_IP}\" \
+        --wait"
+    fi
+    
+    if eval "${HELM_CMD}" 2>&1 | tee /tmp/helm-output.log; then
+        echo "   NGINX Ingress installed/upgraded successfully"
         break
     else
         if grep -q "another operation.*is in progress" /tmp/helm-output.log 2>/dev/null; then
@@ -308,12 +331,18 @@ cp "${PROJECT_ROOT}/helm/open-webui/values.yaml.example" "${PROJECT_ROOT}/helm/o
 WEBUI_SECRET_KEY=$(openssl rand -hex 32)
 OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
 
+# Debug: Log API key status (without exposing full key)
 if [ -n "${OPENROUTER_API_KEY}" ]; then
+    echo "   ✓ OpenRouter API key received from environment"
+    echo "   Key length: ${#OPENROUTER_API_KEY} characters"
+    echo "   First 8 chars: ${OPENROUTER_API_KEY:0:8}..."
+    echo "   Last 8 chars: ...${OPENROUTER_API_KEY: -8}"
     echo "   Using OpenRouter API key from environment"
     API_KEY_ESCAPED=$(echo "${OPENROUTER_API_KEY}" | sed 's/[[\.*^$()+?{|]/\\&/g')
     sed -i.bak "s|openrouterApiKey: \"\"|openrouterApiKey: \"${API_KEY_ESCAPED}\"|g" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local"
+    echo "   ✓ API key written to values.yaml.local"
 else
-    echo "    OpenRouter API key not set (models may not work)"
+    echo "   ✗ OpenRouter API key NOT set (models may not work)"
     echo "   Set OPENROUTER_API_KEY environment variable to enable 344+ AI models"
 fi
 
@@ -379,12 +408,23 @@ if [ -n "${OPENROUTER_API_KEY:-}" ]; then
 }
 PATCH
 )" || {
+      echo "   Patch failed, creating secret from scratch..."
       kubectl create secret generic open-webui-secrets \
         --from-literal=OPENAI_API_KEY="${OPENROUTER_API_KEY}" \
         --from-literal=OPENAI__API_KEY="${OPENROUTER_API_KEY}" \
         -n "${NAMESPACE}" \
         --dry-run=client -o yaml | kubectl apply -f - || true
     }
+    
+    # Verify secret was updated
+    SECRET_CHECK=$(kubectl get secret open-webui-secrets -n "${NAMESPACE}" -o jsonpath='{.data.OPENAI__API_KEY}' 2>/dev/null || echo "")
+    if [ -n "${SECRET_CHECK}" ]; then
+        echo "   ✓ Secret open-webui-secrets updated with OPENAI__API_KEY"
+    else
+        echo "   ✗ Warning: Could not verify secret update"
+    fi
+else
+    echo "   OpenRouter API key not provided, skipping secret update"
 fi
 
 echo "   Ensuring Helm metadata on open-webui-secrets..."

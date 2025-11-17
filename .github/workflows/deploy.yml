@@ -123,14 +123,27 @@ jobs:
       - name: Deploy Application to Kubernetes
         run: |
           chmod +x ./scripts/deploy-to-k8s.sh
-          echo "Starting deployment with environment variables:"
+          echo "=== Starting deployment with environment variables ==="
           echo "GCP_PROJECT_ID=${GCP_PROJECT_ID}"
           echo "CLUSTER_NAME=${CLUSTER_NAME}"
           echo "NAMESPACE=${NAMESPACE}"
           echo "BACKUP_BUCKET=${BACKUP_BUCKET}"
           echo "DOMAIN=${DOMAIN}"
-          echo "OPENROUTER_API_KEY is set: $([ -n \"${OPENROUTER_API_KEY}\" ] && echo 'yes' || echo 'no')"
-          echo "GCP_SA_KEY is set: $([ -n \"${GCP_SA_KEY}\" ] && echo 'yes' || echo 'no')"
+          
+          # Verify OPENROUTER_API_KEY is passed correctly
+          if [ -n "${OPENROUTER_API_KEY}" ]; then
+            echo "✓ OPENROUTER_API_KEY is set (length: ${#OPENROUTER_API_KEY} characters)"
+            echo "  First 10 chars: ${OPENROUTER_API_KEY:0:10}..."
+            echo "  Last 10 chars: ...${OPENROUTER_API_KEY: -10}"
+          else
+            echo "✗ OPENROUTER_API_KEY is NOT set (models won't work)"
+          fi
+          
+          if [ -n "${GCP_SA_KEY}" ]; then
+            echo "✓ GCP_SA_KEY is set (length: ${#GCP_SA_KEY} characters)"
+          else
+            echo "✗ GCP_SA_KEY is NOT set"
+          fi
           
           # Run deployment script and capture output
           set +e  # Don't exit on error, we want to capture diagnostics

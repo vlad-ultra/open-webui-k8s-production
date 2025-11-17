@@ -25,6 +25,13 @@ spec:
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        # Force pod recreation on each deployment
+        # Release.Revision increments on each helm upgrade, forcing pod recreation
+        deployment.kubernetes.io/revision: {{ .Release.Revision | quote }}
+        helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+        app.kubernetes.io/version: {{ .Chart.AppVersion | default .Values.image.tag | quote }}
+        # Add timestamp to force recreation (Helm Release.Time changes on each upgrade)
+        deployment.timestamp: {{ .Release.Time | date "20060102150405" | quote }}
       labels:
         {{- include "open-webui.selectorLabels" . | nindent 8 }}
     spec:
