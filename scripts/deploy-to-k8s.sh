@@ -205,26 +205,32 @@ fi
 echo "   cert-manager installed and SSL certificate ready"
 echo ""
 
-# Step 5.5: Install NFS provisioner for ReadWriteMany support (if not already installed)
-echo "Step 5.5: Checking NFS provisioner for ReadWriteMany support..."
-# Check if storage class exists and is working
-NFS_PROVISIONER_NEEDED=true
-if kubectl get storageclass nfs-client >/dev/null 2>&1; then
-    # Check if NFS provisioner pod is actually running
-    if kubectl get pods -n nfs-provisioner -l app=nfs-subdir-external-provisioner --field-selector=status.phase=Running --no-headers 2>/dev/null | grep -q .; then
-        echo "   NFS provisioner already installed and running (storage class 'nfs-client' exists)"
-        NFS_PROVISIONER_NEEDED=false
-    else
-        echo "   Storage class 'nfs-client' exists but provisioner pod not running. Reinstalling..."
+# Step 5.5: Check if NFS provisioner is needed (optional - only if ReadWriteMany is required)
+echo "Step 5.5: Checking storage requirements..."
+DESIRED_ACCESS_MODE=$(grep "^[[:space:]]*accessMode:" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local" 2>/dev/null | head -1 | sed 's/.*accessMode:[[:space:]]*\([^#]*\).*/\1/' | tr -d '"' | tr -d ' ' || echo "ReadWriteOnce")
+if [ "${DESIRED_ACCESS_MODE}" = "ReadWriteMany" ]; then
+    echo "   ReadWriteMany detected - NFS provisioner may be needed"
+    # Check if storage class exists and is working
+    NFS_PROVISIONER_NEEDED=true
+    if kubectl get storageclass nfs-client >/dev/null 2>&1; then
+        # Check if NFS provisioner pod is actually running
+        if kubectl get pods -n nfs-provisioner -l app=nfs-subdir-external-provisioner --field-selector=status.phase=Running --no-headers 2>/dev/null | grep -q .; then
+            echo "   NFS provisioner already installed and running (storage class 'nfs-client' exists)"
+            NFS_PROVISIONER_NEEDED=false
+        else
+            echo "   Storage class 'nfs-client' exists but provisioner pod not running. Reinstalling..."
+        fi
     fi
-fi
 
-if [ "$NFS_PROVISIONER_NEEDED" = "true" ]; then
-    echo "   NFS provisioner not found or not working. Installing..."
-    echo "   Note: This is normal when infrastructure is recreated (cluster was destroyed and recreated)"
-    chmod +x "${PROJECT_ROOT}/scripts/install-nfs-provisioner.sh"
-    "${PROJECT_ROOT}/scripts/install-nfs-provisioner.sh"
-    echo "   NFS provisioner installed successfully"
+    if [ "$NFS_PROVISIONER_NEEDED" = "true" ]; then
+        echo "   NFS provisioner not found or not working. Installing..."
+        echo "   Note: This is normal when infrastructure is recreated (cluster was destroyed and recreated)"
+        chmod +x "${PROJECT_ROOT}/scripts/install-nfs-provisioner.sh"
+        "${PROJECT_ROOT}/scripts/install-nfs-provisioner.sh"
+        echo "   NFS provisioner installed successfully"
+    fi
+else
+    echo "   Using ReadWriteOnce - no NFS provisioner needed (standard GKE storage is sufficient)"
 fi
 echo ""
 

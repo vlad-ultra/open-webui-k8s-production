@@ -79,7 +79,7 @@ jobs:
     name: Deploy app To Kubernetes
     runs-on: ubuntu-latest
     needs: create-infrastructure
-    timeout-minutes: 20
+    timeout-minutes: 30  # Increased timeout for NFS provisioner installation
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -126,37 +126,56 @@ jobs:
       - name: Verify Deployment
         run: |
           echo " Deployment completed!"
-          echo "Pod status:"
-          kubectl get pods -n ${{ env.NAMESPACE }}
+          echo "Checking application pods (should be 3 replicas):"
+          kubectl get pods -n ${{ env.NAMESPACE }} -l app.kubernetes.io/name=open-webui
           echo ""
-          echo " Ingress status:"
+          REPLICAS=$(kubectl get deployment open-webui -n ${{ env.NAMESPACE }} -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+          READY=$(kubectl get deployment open-webui -n ${{ env.NAMESPACE }} -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+          echo "Expected replicas: ${REPLICAS}"
+          echo "Ready replicas: ${READY}"
+          if [ "${READY}" != "${REPLICAS}" ]; then
+            echo "Warning: Not all replicas are ready yet"
+          fi
+          echo ""
+          echo "Ingress status:"
           kubectl get ingress -n ${{ env.NAMESPACE }}
           echo ""
-          echo " Application URL: https://${{ env.DOMAIN }}"
+          echo "Application URL: https://${{ env.DOMAIN }}"
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
           USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
       
-      - name: Diagnose pod if not Ready
+      - name: Diagnose pods if not Ready
         run: |
           set -e
           NS=${{ env.NAMESPACE }}
           echo "Diagnosing pod status in namespace ${NS} ..."
-          POD=$(kubectl get pods -n "${NS}" -l app.kubernetes.io/name=open-webui -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-          if [ -z "${POD}" ]; then
-            echo "No pod found with label app.kubernetes.io/name=open-webui"
-            exit 1
-          fi
-          READY=$(kubectl get pod "${POD}" -n "${NS}" -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null || echo "false")
-          if [ "${READY}" = "true" ]; then
-            echo "Pod ${POD} is Ready"
+          REPLICAS=$(kubectl get deployment open-webui -n "${NS}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+          READY=$(kubectl get deployment open-webui -n "${NS}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+          echo "Expected replicas: ${REPLICAS}, Ready replicas: ${READY}"
+          
+          if [ "${READY}" = "${REPLICAS}" ] && [ "${REPLICAS}" != "0" ]; then
+            echo "All ${REPLICAS} replicas are ready!"
             exit 0
           fi
-          echo "Pod ${POD} is not Ready. Fetching description and recent events..."
-          echo "---- kubectl describe pod ${POD} ----"
-          kubectl describe pod "${POD}" -n "${NS}" || true
-          echo "---- recent events ----"
+          
+          echo "Not all replicas are ready. Checking pod status..."
+          kubectl get pods -n "${NS}" -l app.kubernetes.io/name=open-webui
+          echo ""
+          
+          # Check each pod
+          for POD in $(kubectl get pods -n "${NS}" -l app.kubernetes.io/name=open-webui -o jsonpath='{.items[*].metadata.name}'); do
+            POD_READY=$(kubectl get pod "${POD}" -n "${NS}" -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null || echo "false")
+            if [ "${POD_READY}" != "true" ]; then
+              echo "---- Pod ${POD} is not Ready ----"
+              kubectl describe pod "${POD}" -n "${NS}" || true
+              echo ""
+            fi
+          done
+          
+          echo "---- Recent events ----"
           kubectl get events -n "${NS}" --sort-by=.lastTimestamp | tail -n 50 || true
+          
           # Surface failure to make it visible in CI
           exit 1
         env:
