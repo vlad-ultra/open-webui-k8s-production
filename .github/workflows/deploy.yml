@@ -9,7 +9,6 @@ on:
       - 'helm/**'
       - 'scripts/**'
       - '.github/workflows/deploy.yml'
-  workflow_dispatch:  # Manual trigger
 
 env:
   # Required secrets - only 2 secrets needed!
