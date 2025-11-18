@@ -570,4 +570,4 @@ This project is for educational and portfolio purposes. It demonstrates producti
 **Contact for AI Models Access:** svvados@gmail.com  
 **Live Application:** https://ai-k8s.svdevops.tech/
 
-#Check CI/CD Deploy
+#Check CI/CD 
