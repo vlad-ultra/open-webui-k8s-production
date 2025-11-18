@@ -3,6 +3,7 @@
 # Usage: ./scripts/deploy-to-k8s.sh
 # 
 # Prerequisites: Infrastructure must be deployed first with ./scripts/deploy-infra.sh
+# Auto-domain configuration: domain is automatically set from DOMAIN environment variable
 # 
 # This script will:
 # 1. Get cluster credentials
