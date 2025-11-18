@@ -175,7 +175,7 @@ The deployment consists of two sequential GitHub Actions jobs:
 │   ├── deploy-infra.sh            # Infrastructure deployment
 │   ├── deploy-to-k8s.sh           # Simplified app deployment (~220 lines)
 │   ├── destroy-infra.sh           # Infrastructure destruction
-│   ├── create-self-signed-cert.sh # SSL certificate creation
+│   ├── create-self-signed-cert.sh # SSL certificate creation/loading
 │   └── install-nfs-provisioner.sh # NFS provisioner installation
 │
 └── README.md                      # This file
