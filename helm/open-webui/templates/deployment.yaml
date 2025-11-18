@@ -48,21 +48,39 @@ spec:
           BACKUP_BUCKET="{{ .Values.backup.gcsBucket }}"
           BACKUP_FILE="gs://${BACKUP_BUCKET}/latest.db"
           
-          # Fast check: if database exists and is >20KB, skip restore (saves 10-20 seconds)
+          # Install sqlite3 for database validation
+          apk add --no-cache sqlite3 >/dev/null 2>&1 || true
+          
+          # Check if database exists and has users (proper validation)
           if [ -f "${DB_FILE}" ]; then
             DB_SIZE=$(stat -c%s "${DB_FILE}" 2>/dev/null || stat -f%z "${DB_FILE}" 2>/dev/null || echo "0")
-            if [ "${DB_SIZE}" -gt 20480 ]; then
-              echo "Database exists (${DB_SIZE} bytes), skipping restore"
-              exit 0
+            if [ "${DB_SIZE}" -gt 0 ]; then
+              echo "Database file exists (${DB_SIZE} bytes), checking for users..."
+              # Check if database has users using sqlite3
+              if command -v sqlite3 >/dev/null 2>&1; then
+                USER_COUNT=$(sqlite3 "${DB_FILE}" "SELECT COUNT(*) FROM user;" 2>/dev/null || echo "0")
+                if [ "${USER_COUNT}" -gt 0 ]; then
+                  echo "Database already exists with ${USER_COUNT} users, skipping restore"
+                  exit 0
+                else
+                  echo "Database exists but has no users, will restore from backup"
+                fi
+              else
+                # If sqlite3 not available, check file size (if very small, likely empty)
+                if [ "${DB_SIZE}" -lt 20480 ]; then
+                  echo "Database file is small (${DB_SIZE} bytes), will restore from backup"
+                else
+                  echo "Database exists (${DB_SIZE} bytes), assuming valid, skipping restore"
+                  exit 0
+                fi
+              fi
             fi
           fi
           
-          # Only install sqlite3 if we need to restore (saves time if DB exists)
-          apk add --no-cache sqlite3 >/dev/null 2>&1 || true
-          
           # Restore from backup
+          echo "Attempting to restore database from backup..."
           if gsutil -q stat "${BACKUP_FILE}" 2>/dev/null; then
-            echo "Restoring database from backup..."
+            echo "Backup found at ${BACKUP_FILE}, downloading..."
             gsutil cp "${BACKUP_FILE}" "${DB_FILE}.backup" && \
             cp "${DB_FILE}.backup" "${DB_FILE}" && \
             chmod 666 "${DB_FILE}" && \
@@ -70,9 +88,23 @@ spec:
               echo "Warning: Restore failed, creating empty database"
               touch "${DB_FILE}"
               chmod 666 "${DB_FILE}" || true
+              exit 0
             }
+            
+            # Verify restore was successful (check for users)
+            if command -v sqlite3 >/dev/null 2>&1; then
+              USER_COUNT=$(sqlite3 "${DB_FILE}" "SELECT COUNT(*) FROM user;" 2>/dev/null || echo "0")
+              if [ "${USER_COUNT}" -gt 0 ]; then
+                echo "Database restored successfully with ${USER_COUNT} users!"
+              else
+                echo "Warning: Database restored but no users found"
+              fi
+            else
+              DB_SIZE=$(stat -c%s "${DB_FILE}" 2>/dev/null || stat -f%z "${DB_FILE}" 2>/dev/null || echo "0")
+              echo "Database restored (${DB_SIZE} bytes)"
+            fi
           else
-            echo "No backup found, creating empty database"
+            echo "No backup found at ${BACKUP_FILE}, creating empty database"
             touch "${DB_FILE}"
             chmod 666 "${DB_FILE}" || true
           fi

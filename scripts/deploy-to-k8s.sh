@@ -111,6 +111,12 @@ echo ""
 echo "Step 6: Preparing namespace and secrets..."
 kubectl create namespace "${NAMESPACE}" 2>/dev/null || true
 
+# Ensure namespace has Helm metadata (required for Helm to manage it)
+echo "   Ensuring Helm metadata on namespace..."
+kubectl label namespace "${NAMESPACE}" app.kubernetes.io/managed-by=Helm --overwrite 2>/dev/null || true
+kubectl annotate namespace "${NAMESPACE}" meta.helm.sh/release-name=open-webui --overwrite 2>/dev/null || true
+kubectl annotate namespace "${NAMESPACE}" meta.helm.sh/release-namespace="${NAMESPACE}" --overwrite 2>/dev/null || true
+
 # Create GCP SA secret if provided
 if [ -n "${GCP_SA_KEY:-}" ]; then
     kubectl create secret generic gcp-sa-key \
