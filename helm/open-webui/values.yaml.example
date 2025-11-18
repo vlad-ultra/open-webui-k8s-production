@@ -44,42 +44,42 @@ image:
 # Single replica provides better WebSocket performance (no load balancing needed)
 replicaCount: 1
 
-# Resource limits and requests
+# Resource limits and requests - increased CPU for faster startup
 resources:
   requests:
-    memory: "512Mi"
-    cpu: "250m"
+    memory: "256Mi"
+    cpu: "200m"      # Increased for faster startup
   limits:
-    memory: "2Gi"
-    cpu: "1000m"
+    memory: "1Gi"
+    cpu: "1000m"     # More CPU available for faster initialization
 
-# Health checks
+# Health checks - relaxed for faster startup and to prevent 503 errors
 livenessProbe:
   httpGet:
     path: /api/health
     port: http
-  initialDelaySeconds: 30
-  periodSeconds: 10
-  timeoutSeconds: 5
-  failureThreshold: 3
+  initialDelaySeconds: 60
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 5
 
 readinessProbe:
   httpGet:
     path: /api/health
     port: http
-  initialDelaySeconds: 10
-  periodSeconds: 5
+  initialDelaySeconds: 10  # Start checking earlier
+  periodSeconds: 5         # Check more frequently
   timeoutSeconds: 3
-  failureThreshold: 3
+  failureThreshold: 6
 
 startupProbe:
   httpGet:
     path: /api/health
     port: http
-  initialDelaySeconds: 0
-  periodSeconds: 10
+  initialDelaySeconds: 5   # Start checking earlier
+  periodSeconds: 5         # Check more frequently
   timeoutSeconds: 3
-  failureThreshold: 30
+  failureThreshold: 120    # Allow up to 10 minutes total (5s + 119*5s = 600s)
 
 # Service configuration
 service:

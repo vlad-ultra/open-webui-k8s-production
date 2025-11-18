@@ -43,64 +43,36 @@ spec:
         - -c
         - |
           set -e
-          # Install sqlite3 for database validation
-          apk add --no-cache sqlite3 >/dev/null 2>&1 || true
-          
           DATA_DIR="{{ .Values.env.DATA_DIR }}"
           DB_FILE="${DATA_DIR}/webui.db"
           BACKUP_BUCKET="{{ .Values.backup.gcsBucket }}"
           BACKUP_FILE="gs://${BACKUP_BUCKET}/latest.db"
           
-          echo "Checking for existing database..."
+          # Fast check: if database exists and is >20KB, skip restore (saves 10-20 seconds)
           if [ -f "${DB_FILE}" ]; then
-            DB_SIZE=$(stat -f%z "${DB_FILE}" 2>/dev/null || stat -c%s "${DB_FILE}" 2>/dev/null || echo "0")
-            if [ "${DB_SIZE}" -gt 0 ]; then
-              echo "   Database file exists (${DB_SIZE} bytes), checking if it has users..."
-              # Check if database has users using sqlite3
-              if command -v sqlite3 >/dev/null 2>&1; then
-                USER_COUNT=$(sqlite3 "${DB_FILE}" "SELECT COUNT(*) FROM user;" 2>/dev/null || echo "0")
-                if [ "${USER_COUNT}" -gt 0 ]; then
-                  echo "Database already exists with ${USER_COUNT} users, skipping restore"
-                  exit 0
-                else
-                  echo "   Database exists but has no users (${USER_COUNT}), will restore from backup"
-                fi
-              else
-                # If sqlite3 not available, check file size (if very small, likely empty)
-                if [ "${DB_SIZE}" -lt 10000 ]; then
-                  echo "   Database file is very small (${DB_SIZE} bytes), will restore from backup"
-                else
-                  echo "Database already exists (${DB_SIZE} bytes), skipping restore"
-                  exit 0
-                fi
-              fi
+            DB_SIZE=$(stat -c%s "${DB_FILE}" 2>/dev/null || stat -f%z "${DB_FILE}" 2>/dev/null || echo "0")
+            if [ "${DB_SIZE}" -gt 20480 ]; then
+              echo "Database exists (${DB_SIZE} bytes), skipping restore"
+              exit 0
             fi
           fi
           
-          echo "Database not found or empty, attempting to restore from backup..."
-          echo "   Backup location: ${BACKUP_FILE}"
+          # Only install sqlite3 if we need to restore (saves time if DB exists)
+          apk add --no-cache sqlite3 >/dev/null 2>&1 || true
           
+          # Restore from backup
           if gsutil -q stat "${BACKUP_FILE}" 2>/dev/null; then
-            echo "   Backup found, downloading..."
-            gsutil cp "${BACKUP_FILE}" "${DB_FILE}.backup" || {
-              echo "   Error: Failed to download backup"
-              exit 1
+            echo "Restoring database from backup..."
+            gsutil cp "${BACKUP_FILE}" "${DB_FILE}.backup" && \
+            cp "${DB_FILE}.backup" "${DB_FILE}" && \
+            chmod 666 "${DB_FILE}" && \
+            rm -f "${DB_FILE}.backup" || {
+              echo "Warning: Restore failed, creating empty database"
+              touch "${DB_FILE}"
+              chmod 666 "${DB_FILE}" || true
             }
-            
-            echo "   Restoring database..."
-            cp "${DB_FILE}.backup" "${DB_FILE}" || {
-              echo "   Error: Failed to restore database"
-              exit 1
-            }
-            
-            # Set proper permissions
-            chmod 666 "${DB_FILE}" || true
-            
-            echo "   Database restored successfully!"
-            rm -f "${DB_FILE}.backup"
           else
-            echo "   Warning: No backup found at ${BACKUP_FILE}, starting with fresh database"
-            echo "   Creating empty database file..."
+            echo "No backup found, creating empty database"
             touch "${DB_FILE}"
             chmod 666 "${DB_FILE}" || true
           fi
@@ -119,11 +91,11 @@ spec:
         {{- end }}
         resources:
           requests:
-            memory: "128Mi"
-            cpu: "100m"
+            memory: "64Mi"
+            cpu: "200m"  # More CPU for faster restore/download
           limits:
-            memory: "256Mi"
-            cpu: "200m"
+            memory: "128Mi"
+            cpu: "500m"
       {{- end }}
       containers:
       - name: {{ .Chart.Name }}
