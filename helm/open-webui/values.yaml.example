@@ -32,8 +32,9 @@ image:
   pullPolicy: IfNotPresent
 
 # Replica configuration
-# Using ReadWriteMany (RWX) storage to support multiple replicas
-replicaCount: 2
+# Using ReadWriteMany (RWX) storage for zero-downtime rolling updates
+# Single replica provides better WebSocket performance (no load balancing needed)
+replicaCount: 1
 
 # Resource limits and requests
 resources:

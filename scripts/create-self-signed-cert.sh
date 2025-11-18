@@ -5,7 +5,7 @@
 
 set -e
 
-DOMAIN="${1:-ai-k8s.svdevops.tech}"
+DOMAIN="${1:-ai.svdevops.tech}"
 NAMESPACE="${2:-ai}"
 SECRET_NAME="open-webui-tls"
 

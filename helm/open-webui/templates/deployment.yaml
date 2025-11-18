@@ -8,30 +8,22 @@ metadata:
 spec:
   replicas: {{ .Values.replicaCount }}
   strategy:
-    {{- if eq (int .Values.replicaCount) 1 }}
-    type: Recreate  # Recreate strategy for single replica with ReadWriteOnce PVC
-    {{- else }}
-    type: RollingUpdate  # RollingUpdate for multiple replicas (zero downtime)
+    type: RollingUpdate  # RollingUpdate for zero-downtime updates (works with ReadWriteMany storage)
     rollingUpdate:
-      maxSurge: 1  # Allow 1 extra pod during update
-      maxUnavailable: 1  # Allow 1 pod to be unavailable during update (enables graceful rolling)
-    {{- end }}
+      maxSurge: 1  # Allow 1 extra pod during update (create new pod before terminating old)
+      maxUnavailable: 0  # Never allow pods to be unavailable (zero downtime guarantee)
   selector:
     matchLabels:
       {{- include "open-webui.selectorLabels" . | nindent 6 }}
   template:
-    metadata:
-      annotations:
-        {{- with .Values.podAnnotations }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
-        # Force pod recreation on each deployment
-        # Release.Revision increments on each helm upgrade, forcing pod recreation
-        deployment.kubernetes.io/revision: {{ .Release.Revision | quote }}
-        helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
-        app.kubernetes.io/version: {{ .Chart.AppVersion | default .Values.image.tag | quote }}
-        # Add timestamp to force recreation (Helm Release.Time changes on each upgrade)
-        deployment.timestamp: {{ .Release.Time | date "20060102150405" | quote }}
+      metadata:
+        annotations:
+          {{- with .Values.podAnnotations }}
+          {{- toYaml . | nindent 8 }}
+          {{- end }}
+          helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+          app.kubernetes.io/version: {{ .Chart.AppVersion | default .Values.image.tag | quote }}
+          helm.sh/revision: {{ .Release.Revision | quote }}
       labels:
         {{- include "open-webui.selectorLabels" . | nindent 8 }}
     spec:
@@ -42,21 +34,8 @@ spec:
       {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      initContainers:
-      - name: fix-permissions
-        image: {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
-        securityContext:
-          runAsUser: 0
-          allowPrivilegeEscalation: true
-        command:
-        - /bin/sh
-        - -c
-        - |
-          echo "Fixing permissions for static files..."
-          chown -R 1000:1000 /app/backend/open_webui/static/ 2>/dev/null || true
-          chmod -R 755 /app/backend/open_webui/static/ 2>/dev/null || true
-          echo "Permissions fixed"
       {{- if and .Values.persistence.enabled .Values.backup.enabled .Values.backup.restoreOnDeploy }}
+      initContainers:
       - name: restore-database
         image: google/cloud-sdk:alpine
         command:

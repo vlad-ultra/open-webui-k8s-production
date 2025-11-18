@@ -20,7 +20,7 @@ cd "${PROJECT_ROOT}"
 NAMESPACE="ai"
 APP_NAME="open-webui"
 BACKUP_BUCKET="open-webui-backups"
-DOMAIN="${DOMAIN:-ai-k8s.svdevops.tech}"
+DOMAIN="${DOMAIN:-ai.svdevops.tech}"
 SECRET_NAME="open-webui-tls"
 # Set default values for terraform variables
 GCP_PROJECT_ID="${TF_VAR_project_id:-${GCP_PROJECT_ID:-ai-cluster-478022}}"
@@ -246,26 +246,56 @@ fi
 echo "    NGINX Ingress installed with IP: ${INGRESS_IP}"
 echo ""
 
-# Step 5: Load SSL certificates from GCS bucket
+# Step 5: Load SSL certificates from GCS bucket (Let's Encrypt preferred)
 echo "Step 5: Loading SSL certificates from GCS bucket..."
-echo "   Note: cert-manager is disabled - using manual certificates from GCS"
-
-# Always load certificates from GCS bucket (never generate new ones)
-# Certificates are stored in gs://open-webui-backups/certs/ and reused
-DOMAIN="${DOMAIN:-ai-k8s.svdevops.tech}"
+DOMAIN="${DOMAIN:-ai.svdevops.tech}"
 BACKUP_BUCKET="${BACKUP_BUCKET:-open-webui-backups}"
 
-# Delete cert-manager Certificate resource if exists (we use manual certificates from GCS)
-if kubectl get certificate open-webui-tls -n "${NAMESPACE}" >/dev/null 2>&1; then
-    echo "   Removing cert-manager Certificate resource (using manual certificates from GCS)..."
-    kubectl delete certificate open-webui-tls -n "${NAMESPACE}" --ignore-not-found=true
+# Check if Let's Encrypt certificates exist in GCS bucket
+GCS_CERT_FILE="gs://${BACKUP_BUCKET}/certs/${DOMAIN}.crt"
+GCS_KEY_FILE="gs://${BACKUP_BUCKET}/certs/${DOMAIN}.key"
+
+echo "   Checking for Let's Encrypt certificates in GCS bucket..."
+if gsutil -q stat "${GCS_CERT_FILE}" 2>/dev/null && gsutil -q stat "${GCS_KEY_FILE}" 2>/dev/null; then
+    # Download and check if it's Let's Encrypt certificate
+    TEMP_CERT=$(mktemp)
+    gsutil cp "${GCS_CERT_FILE}" "${TEMP_CERT}" 2>/dev/null
+    CERT_ISSUER=$(openssl x509 -in "${TEMP_CERT}" -noout -issuer 2>/dev/null || echo "")
+    rm -f "${TEMP_CERT}"
+    
+    if echo "${CERT_ISSUER}" | grep -q "Let's Encrypt\|R3\|X3"; then
+        echo "   ✓ Let's Encrypt certificates found in GCS bucket, using them..."
+        
+        # Remove cert-manager annotation from Ingress to prevent auto-generation
+        echo "   Removing cert-manager annotation from Ingress (using certificates from GCS)..."
+        kubectl annotate ingress open-webui -n "${NAMESPACE}" cert-manager.io/cluster-issuer- 2>/dev/null || true
+        
+        # Delete Certificate resource if exists (we use manual certificates from GCS)
+        if kubectl get certificate open-webui-tls -n "${NAMESPACE}" >/dev/null 2>&1; then
+            echo "   Deleting cert-manager Certificate resource (using certificates from GCS)..."
+            kubectl delete certificate open-webui-tls -n "${NAMESPACE}" --ignore-not-found=true
+        fi
+        
+        # Load certificates from GCS bucket
+        BACKUP_BUCKET="${BACKUP_BUCKET}" \
+        "${PROJECT_ROOT}/scripts/create-self-signed-cert.sh" "${DOMAIN}" "${NAMESPACE}"
+        echo "   ✓ Let's Encrypt certificates loaded from GCS bucket (cert-manager disabled)"
+    else
+        echo "   ⚠ Found certificates in GCS, but they are self-signed (not Let's Encrypt)"
+        echo "   Using self-signed certificates from GCS..."
+        BACKUP_BUCKET="${BACKUP_BUCKET}" \
+        "${PROJECT_ROOT}/scripts/create-self-signed-cert.sh" "${DOMAIN}" "${NAMESPACE}"
+        echo "   ✓ Self-signed certificates loaded from GCS bucket"
+        echo "   Note: To use Let's Encrypt, upload Let's Encrypt certificates to gs://${BACKUP_BUCKET}/certs/"
+    fi
+else
+    echo "   ⚠ No certificates found in GCS bucket"
+    echo "   Generating self-signed certificates..."
+    BACKUP_BUCKET="${BACKUP_BUCKET}" \
+    "${PROJECT_ROOT}/scripts/create-self-signed-cert.sh" "${DOMAIN}" "${NAMESPACE}"
+    echo "   ✓ Self-signed certificates generated and saved to GCS bucket"
+    echo "   Note: cert-manager disabled. To use Let's Encrypt, upload Let's Encrypt certificates to gs://${BACKUP_BUCKET}/certs/"
 fi
-
-# Always create/update secret from GCS bucket (will download existing Let's Encrypt certs or use local)
-BACKUP_BUCKET="${BACKUP_BUCKET}" \
-"${PROJECT_ROOT}/scripts/create-self-signed-cert.sh" "${DOMAIN}" "${NAMESPACE}"
-
-echo "   ✓ SSL certificates loaded from GCS bucket"
 echo ""
 
 # Step 5.5: Check if NFS provisioner is needed (optional - only if ReadWriteMany is required)
@@ -569,6 +599,16 @@ fi
 echo "    Helm deployment command completed"
 echo ""
 
+# Step 11.5: Force rolling update by restarting deployment (ensures new pod is created)
+# This works around Helm not always detecting pod template changes
+echo "Step 11.5: Forcing rolling update to ensure new pod is created..."
+if kubectl rollout restart deployment/open-webui -n "${NAMESPACE}" 2>/dev/null; then
+    echo "    Deployment restart initiated for zero-downtime rolling update"
+else
+    echo "    Warning: Failed to restart deployment (may already be in progress)"
+fi
+echo ""
+
 # Step 12: Ensure required secrets exist (fallback for chart issues) — kept as safety
 echo "Step 12: Ensuring required secrets exist (post-deploy safety)..."
 kubectl get secret open-webui-secrets -n "${NAMESPACE}" >/dev/null 2>&1 || {
@@ -669,6 +709,6 @@ kubectl get pods -n "${NAMESPACE}"
 echo ""
 kubectl get ingress -n "${NAMESPACE}"
 echo ""
-echo " Domain: https://ai-k8s.svdevops.tech"
+echo " Domain: https://ai.svdevops.tech"
 echo " IP: ${INGRESS_IP}"
 

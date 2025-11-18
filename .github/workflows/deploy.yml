@@ -26,7 +26,7 @@ env:
   CLUSTER_NAME: open-webui-cluster
   NAMESPACE: ai
   BACKUP_BUCKET: open-webui-backups
-  DOMAIN: ai-k8s.svdevops.tech
+  DOMAIN: ai.svdevops.tech
 
 jobs:
   create-infrastructure:
