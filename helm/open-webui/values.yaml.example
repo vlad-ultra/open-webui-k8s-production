@@ -3,27 +3,35 @@
 # values.yaml.local is gitignored and will not be committed to the repository
 
 # Domain and namespace configuration
-domain: ai-k8s.svdevops.tech
+domain: ai.svdevops.tech
 namespace: ai
 ingress:
   enabled: true
   className: nginx
   annotations:
-    # Option 1: Use cert-manager for Let's Encrypt (after rate limit resets)
-    # cert-manager.io/cluster-issuer: letsencrypt-prod
-    # Option 2: Use self-signed certificate (created by deploy script)
-    # No annotation needed - secret will be used directly
+    # cert-manager annotation removed - using Let's Encrypt certificates from GCS bucket
+    # cert-manager.io/cluster-issuer: letsencrypt-prod  # Disabled - certificates loaded from GCS to avoid rate limits
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # WebSocket support for streaming chat responses
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/websocket-services: "open-webui"
+    # Enable sticky sessions for better WebSocket handling
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "route"
+    nginx.ingress.kubernetes.io/session-cookie-expires: "172800"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "172800"
+    nginx.ingress.kubernetes.io/session-cookie-samesite: "Lax"
   hosts:
-    - host: ai-k8s.svdevops.tech
+    - host: ai.svdevops.tech
       paths:
         - path: /
           pathType: Prefix
   tls:
     - secretName: open-webui-tls
       hosts:
-        - ai-k8s.svdevops.tech
+        - ai.svdevops.tech
 
 # Image configuration
 image:
@@ -80,6 +88,12 @@ service:
   targetPort: 8080
   protocol: TCP
 
+backup:
+  enabled: true
+  restoreOnDeploy: true
+  gcsBucket: open-webui-backups
+  gcpServiceAccount: ""
+
 # Persistent Volume Configuration
 persistence:
   enabled: true
@@ -98,7 +112,7 @@ env:
   
   # Application Configuration
   WEBUI_NAME: "Open WebUI"
-  WEBUI_URL: "https://ai-k8s.svdevops.tech"
+  WEBUI_URL: "https://ai.svdevops.tech"
   WEBUI_SECRET_KEY: ""  # Should be set via Secret
   DEFAULT_USER_ROLE: "user"
   

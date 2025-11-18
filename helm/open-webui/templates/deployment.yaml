@@ -16,14 +16,14 @@ spec:
     matchLabels:
       {{- include "open-webui.selectorLabels" . | nindent 6 }}
   template:
-      metadata:
-        annotations:
-          {{- with .Values.podAnnotations }}
-          {{- toYaml . | nindent 8 }}
-          {{- end }}
-          helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
-          app.kubernetes.io/version: {{ .Chart.AppVersion | default .Values.image.tag | quote }}
-          helm.sh/revision: {{ .Release.Revision | quote }}
+    metadata:
+      annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+        app.kubernetes.io/version: {{ .Chart.AppVersion | default .Values.image.tag | quote }}
+        helm.sh/revision: {{ .Release.Revision | quote }}
       labels:
         {{- include "open-webui.selectorLabels" . | nindent 8 }}
     spec:

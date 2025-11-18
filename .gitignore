@@ -69,3 +69,4 @@ ssl-certs/
 *.csr
 backup/
 certs/
+cursor_github.md

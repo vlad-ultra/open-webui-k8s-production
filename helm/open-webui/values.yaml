@@ -89,6 +89,12 @@ service:
   targetPort: 8080
   protocol: TCP
 
+backup:
+  enabled: true
+  restoreOnDeploy: true
+  gcsBucket: open-webui-backups
+  gcpServiceAccount: ""
+
 # Persistent Volume Configuration
 persistence:
   enabled: true

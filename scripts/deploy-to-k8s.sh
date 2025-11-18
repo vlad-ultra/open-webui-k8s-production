@@ -357,6 +357,21 @@ echo "Step 7: Preparing Helm values..."
 rm -f "${PROJECT_ROOT}/helm/open-webui/values.yaml.local"
 cp "${PROJECT_ROOT}/helm/open-webui/values.yaml.example" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local"
 
+# Get domain from environment variable (default to ai.svdevops.tech)
+DOMAIN="${DOMAIN:-ai.svdevops.tech}"
+echo "   Using domain: ${DOMAIN}"
+
+# Replace domain in values.yaml.local with the one from environment variable
+# This ensures the domain is always correct, even if values.yaml.example has a different domain
+DOMAIN_ESCAPED=$(echo "${DOMAIN}" | sed 's/[[\.*^$()+?{|]/\\&/g')
+sed -i.bak "s|^domain:.*|domain: ${DOMAIN}|g" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local"
+sed -i.bak "s|^[[:space:]]*- host:.*|    - host: ${DOMAIN}|g" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local"
+sed -i.bak "s|WEBUI_URL:.*|WEBUI_URL: \"https://${DOMAIN}\"|g" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local"
+# Replace TLS hosts (more specific pattern)
+sed -i.bak "s|^[[:space:]]*- ${DOMAIN_ESCAPED}|        - ${DOMAIN}|g" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local"
+sed -i.bak "s|^[[:space:]]*- ai\\.svdevops\\.tech|        - ${DOMAIN}|g" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local"
+sed -i.bak "s|^[[:space:]]*- ai-k8s\\.svdevops\\.tech|        - ${DOMAIN}|g" "${PROJECT_ROOT}/helm/open-webui/values.yaml.local"
+
 WEBUI_SECRET_KEY=$(openssl rand -hex 32)
 OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
 
