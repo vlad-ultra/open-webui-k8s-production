@@ -82,7 +82,7 @@ jobs:
     name: Deploy app To Kubernetes
     runs-on: ubuntu-latest
     needs: create-infrastructure
-    timeout-minutes: 30  # Increased timeout for NFS provisioner installation
+    timeout-minutes: 20  # Simplified script is faster
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -108,75 +108,17 @@ jobs:
         env:
           USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
 
-      - name: Get cluster credentials
-        run: |
-          export USE_GKE_GCLOUD_AUTH_PLUGIN=True
-          gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} \
-            --zone ${{ env.GCP_ZONE }} \
-            --project ${{ env.GCP_PROJECT_ID }}
-          echo "Cluster credentials configured"
-          kubectl cluster-info
-          kubectl get nodes
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
-
       - name: Deploy Application to Kubernetes
         run: |
           chmod +x ./scripts/deploy-to-k8s.sh
-          echo "=== Starting deployment with environment variables ==="
-          echo "GCP_PROJECT_ID=${GCP_PROJECT_ID}"
-          echo "CLUSTER_NAME=${CLUSTER_NAME}"
-          echo "NAMESPACE=${NAMESPACE}"
-          echo "BACKUP_BUCKET=${BACKUP_BUCKET}"
-          echo "DOMAIN=${DOMAIN}"
+          echo "=== Starting deployment ==="
+          echo "Cluster: ${CLUSTER_NAME}"
+          echo "Namespace: ${NAMESPACE}"
+          echo "Domain: ${DOMAIN}"
+          echo ""
           
-          # Verify OPENROUTER_API_KEY is passed correctly
-          if [ -n "${OPENROUTER_API_KEY}" ]; then
-            echo "✓ OPENROUTER_API_KEY is set (length: ${#OPENROUTER_API_KEY} characters)"
-            echo "  First 10 chars: ${OPENROUTER_API_KEY:0:10}..."
-            echo "  Last 10 chars: ...${OPENROUTER_API_KEY: -10}"
-          else
-            echo "✗ OPENROUTER_API_KEY is NOT set (models won't work)"
-          fi
-          
-          if [ -n "${GCP_SA_KEY}" ]; then
-            echo "✓ GCP_SA_KEY is set (length: ${#GCP_SA_KEY} characters)"
-          else
-            echo "✗ GCP_SA_KEY is NOT set"
-          fi
-          
-          # Run deployment script and capture output
-          set +e  # Don't exit on error, we want to capture diagnostics
+          # Run simplified deployment script (handles all checks internally)
           ./scripts/deploy-to-k8s.sh
-          DEPLOY_EXIT_CODE=$?
-          set -e
-          
-          if [ $DEPLOY_EXIT_CODE -ne 0 ]; then
-            echo "=== Deployment script failed with exit code $DEPLOY_EXIT_CODE ==="
-            echo "=== Running diagnostics ==="
-            
-            export USE_GKE_GCLOUD_AUTH_PLUGIN=True
-            gcloud container clusters get-credentials ${CLUSTER_NAME} \
-              --zone ${GCP_ZONE} \
-              --project ${GCP_PROJECT_ID}
-            
-            echo "=== Checking namespace ==="
-            kubectl get namespace ${NAMESPACE} || echo "Namespace not found"
-            
-            echo "=== Checking Helm releases ==="
-            helm list -n ${NAMESPACE} || echo "No Helm releases"
-            
-            echo "=== Checking PVC ==="
-            kubectl get pvc -n ${NAMESPACE} || echo "No PVCs"
-            
-            echo "=== Checking pods ==="
-            kubectl get pods -n ${NAMESPACE} || echo "No pods"
-            
-            echo "=== Checking events ==="
-            kubectl get events -n ${NAMESPACE} --sort-by=.lastTimestamp | tail -n 20 || echo "No events"
-            
-            exit $DEPLOY_EXIT_CODE
-          fi
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
           USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
@@ -193,47 +135,24 @@ jobs:
           OPENROUTER_API_KEY: ${{ env.OPENROUTER_API_KEY }}
           GCP_SA_KEY: ${{ env.GCP_SA_KEY }}
 
-      - name: Verify Deployment
+      - name: Final Status Check
+        if: success()
         run: |
           export USE_GKE_GCLOUD_AUTH_PLUGIN=True
           gcloud container clusters get-credentials ${{ env.CLUSTER_NAME }} \
             --zone ${{ env.GCP_ZONE }} \
             --project ${{ env.GCP_PROJECT_ID }}
           
-          echo "=== Deployment completed! ==="
-          echo ""
-          echo "=== Checking namespace ==="
-          kubectl get namespace ${{ env.NAMESPACE }} || echo "Namespace not found!"
-          echo ""
-          echo "=== Checking all resources in namespace ==="
-          kubectl get all -n ${{ env.NAMESPACE }} || echo "No resources found"
-          echo ""
-          echo "=== Checking Helm releases ==="
-          helm list -n ${{ env.NAMESPACE }} || echo "No Helm releases found"
-          echo ""
-          echo "=== Checking deployment ==="
-          kubectl get deployment -n ${{ env.NAMESPACE }} || echo "No deployment found"
-          echo ""
-          echo "=== Checking pods ==="
-          kubectl get pods -n ${{ env.NAMESPACE }} -l app.kubernetes.io/name=open-webui || echo "No pods found"
-          echo ""
-          REPLICAS=$(kubectl get deployment open-webui -n ${{ env.NAMESPACE }} -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
-          READY=$(kubectl get deployment open-webui -n ${{ env.NAMESPACE }} -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
-          echo "Expected replicas: ${REPLICAS}"
-          echo "Ready replicas: ${READY}"
-          if [ "${READY}" != "${REPLICAS}" ]; then
-            echo "Warning: Not all replicas are ready yet"
-          fi
-          echo ""
-          echo "=== Ingress status ==="
-          kubectl get ingress -n ${{ env.NAMESPACE }} || echo "No ingress found"
+          echo "=== Deployment Status ==="
+          kubectl get pods -n ${{ env.NAMESPACE }} || true
+          kubectl get ingress -n ${{ env.NAMESPACE }} || true
           echo ""
           echo "Application URL: https://${{ env.DOMAIN }}"
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
           USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
       
-      - name: Diagnose pods if not Ready
+      - name: Diagnostics on Failure
         if: failure()
         run: |
           export USE_GKE_GCLOUD_AUTH_PLUGIN=True
@@ -242,71 +161,9 @@ jobs:
             --project ${{ env.GCP_PROJECT_ID }}
           
           NS=${{ env.NAMESPACE }}
-          echo "=== Diagnosing deployment failure in namespace ${NS} ==="
-          echo ""
-          
-          echo "=== Checking if namespace exists ==="
-          kubectl get namespace "${NS}" || echo "Namespace ${NS} does not exist!"
-          echo ""
-          
-          echo "=== Checking all resources ==="
-          kubectl get all -n "${NS}" || echo "No resources found"
-          echo ""
-          
-          echo "=== Checking Helm releases ==="
-          helm list -n "${NS}" || echo "No Helm releases found"
-          if helm list -n "${NS}" | grep -q open-webui; then
-            echo "Helm release exists, checking status:"
-            helm status open-webui -n "${NS}" || true
-          fi
-          echo ""
-          
-          echo "=== Checking deployment ==="
-          kubectl get deployment open-webui -n "${NS}" || echo "Deployment open-webui not found!"
-          if kubectl get deployment open-webui -n "${NS}" >/dev/null 2>&1; then
-            kubectl describe deployment open-webui -n "${NS}" || true
-          fi
-          echo ""
-          
-          REPLICAS=$(kubectl get deployment open-webui -n "${NS}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
-          READY=$(kubectl get deployment open-webui -n "${NS}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
-          echo "Expected replicas: ${REPLICAS}, Ready replicas: ${READY}"
-          
-          if [ "${READY}" = "${REPLICAS}" ] && [ "${REPLICAS}" != "0" ]; then
-            echo "All ${REPLICAS} replicas are ready!"
-            exit 0
-          fi
-          
-          echo "=== Checking pods ==="
-          kubectl get pods -n "${NS}" -l app.kubernetes.io/name=open-webui || echo "No pods found"
-          echo ""
-          
-          # Check each pod
-          for POD in $(kubectl get pods -n "${NS}" -l app.kubernetes.io/name=open-webui -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
-            if [ -n "${POD}" ]; then
-              echo "---- Pod ${POD} details ----"
-              kubectl describe pod "${POD}" -n "${NS}" || true
-              echo ""
-              echo "---- Pod ${POD} logs ----"
-              kubectl logs "${POD}" -n "${NS}" --tail=50 || true
-              echo ""
-            fi
-          done
-          
-          echo "=== Checking all pods in namespace ==="
-          kubectl get pods -n "${NS}" || echo "No pods found"
-          echo ""
-          
-          echo "=== Recent events ==="
-          kubectl get events -n "${NS}" --sort-by=.lastTimestamp | tail -n 50 || echo "No events found"
-          echo ""
-          
-          echo "=== Checking PVC ==="
-          kubectl get pvc -n "${NS}" || echo "No PVCs found"
-          echo ""
-          
-          echo "=== Checking secrets ==="
-          kubectl get secrets -n "${NS}" || echo "No secrets found"
+          echo "=== Deployment Diagnostics ==="
+          kubectl get pods -n "${NS}" || true
+          kubectl get events -n "${NS}" --sort-by=.lastTimestamp | tail -n 30 || true
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
           USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
