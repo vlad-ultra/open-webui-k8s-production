@@ -6,10 +6,6 @@ concurrency:
 
 on:
   workflow_dispatch:
-    inputs:
-      reason:
-        description: "Run deploy workflow"
-        required: false
 
 env:
   # Required secrets - only 2 secrets needed!
