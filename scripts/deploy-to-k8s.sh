@@ -56,13 +56,43 @@ echo "Step 3: Installing NGINX Ingress..."
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx >/dev/null 2>&1 || true
 helm repo update >/dev/null 2>&1
 
-if helm list -n ingress-nginx --filter ingress-nginx -q >/dev/null 2>&1; then
-    echo "NGINX Ingress already installed, upgrading..."
-    helm upgrade ingress-nginx ingress-nginx/ingress-nginx \
+# Check if ingress-nginx deployment exists in cluster (more reliable than helm list)
+if kubectl get deployment ingress-nginx-controller -n ingress-nginx >/dev/null 2>&1; then
+    echo "NGINX Ingress deployment found, attempting upgrade..."
+    # Try upgrade first
+    if helm upgrade ingress-nginx ingress-nginx/ingress-nginx \
         --namespace ingress-nginx \
         --reuse-values \
         --set controller.service.loadBalancerIP="${INGRESS_IP}" \
-        --wait
+        --wait 2>/dev/null; then
+        echo "Upgrade successful"
+    else
+        echo "Upgrade failed, checking if release exists..."
+        # If upgrade fails, check if release actually exists
+        if helm list -n ingress-nginx --filter ingress-nginx -q >/dev/null 2>&1; then
+            echo "Release exists but upgrade failed, trying with force..."
+            helm upgrade ingress-nginx ingress-nginx/ingress-nginx \
+                --namespace ingress-nginx \
+                --reuse-values \
+                --set controller.service.loadBalancerIP="${INGRESS_IP}" \
+                --force \
+                --wait
+        else
+            echo "Release not found in Helm, uninstalling old deployment and reinstalling..."
+            # Remove old deployment manually if helm release is missing
+            kubectl delete deployment ingress-nginx-controller -n ingress-nginx --ignore-not-found=true
+            kubectl delete svc ingress-nginx-controller -n ingress-nginx --ignore-not-found=true
+            sleep 5
+            echo "Installing fresh NGINX Ingress..."
+            helm install ingress-nginx ingress-nginx/ingress-nginx \
+                --namespace ingress-nginx \
+                --create-namespace \
+                --set controller.service.type=LoadBalancer \
+                --set controller.service.annotations."cloud\.google\.com/load-balancer-type"="External" \
+                --set controller.service.loadBalancerIP="${INGRESS_IP}" \
+                --wait
+        fi
+    fi
 else
     echo "Installing NGINX Ingress..."
     helm install ingress-nginx ingress-nginx/ingress-nginx \
