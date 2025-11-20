@@ -53,7 +53,7 @@ echo ""
 
 # Step 3: Install/Upgrade NGINX Ingress
 echo "Step 3: Installing NGINX Ingress..."
-helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx 2>/dev/null || true
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx >/dev/null 2>&1 || true
 helm repo update >/dev/null 2>&1
 
 if helm list -n ingress-nginx --filter ingress-nginx -q >/dev/null 2>&1; then
@@ -62,7 +62,7 @@ if helm list -n ingress-nginx --filter ingress-nginx -q >/dev/null 2>&1; then
         --namespace ingress-nginx \
         --reuse-values \
         --set controller.service.loadBalancerIP="${INGRESS_IP}" \
-        --wait >/dev/null 2>&1 || true
+        --wait
 else
     echo "Installing NGINX Ingress..."
     helm install ingress-nginx ingress-nginx/ingress-nginx \
@@ -71,8 +71,35 @@ else
         --set controller.service.type=LoadBalancer \
         --set controller.service.annotations."cloud\.google\.com/load-balancer-type"="External" \
         --set controller.service.loadBalancerIP="${INGRESS_IP}" \
-        --wait >/dev/null 2>&1 || true
+        --wait
 fi
+
+echo "Verifying ingress controller service..."
+kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=300s
+
+EXPECTED_IP="${INGRESS_IP}"
+INGRESS_SERVICE_IP=""
+for attempt in $(seq 1 30); do
+    INGRESS_SERVICE_IP=$(kubectl get svc ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+    if [ -n "${INGRESS_SERVICE_IP}" ]; then
+        break
+    fi
+    echo "   Waiting for external IP (attempt ${attempt}/30)..."
+    sleep 10
+done
+
+if [ -z "${INGRESS_SERVICE_IP}" ]; then
+    echo "Error: ingress-nginx-controller did not obtain an external IP"
+    kubectl describe svc ingress-nginx-controller -n ingress-nginx || true
+    exit 1
+fi
+
+if [ "${INGRESS_SERVICE_IP}" != "${EXPECTED_IP}" ]; then
+    echo "Error: ingress-nginx-controller IP (${INGRESS_SERVICE_IP}) does not match reserved IP (${EXPECTED_IP})"
+    exit 1
+fi
+
+echo "Ingress controller is ready with IP ${INGRESS_SERVICE_IP}"
 echo ""
 
 # Step 4: Load SSL certificates
