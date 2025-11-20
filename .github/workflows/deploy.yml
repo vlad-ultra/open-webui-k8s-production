@@ -5,14 +5,11 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'terraform/**'
-      - 'helm/**'
-      - 'scripts/**'
-      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Run deploy workflow"
+        required: false
 
 env:
   # Required secrets - only 2 secrets needed!
