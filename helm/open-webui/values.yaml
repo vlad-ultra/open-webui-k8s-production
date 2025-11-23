@@ -12,9 +12,16 @@ ingress:
     # cert-manager.io/cluster-issuer: letsencrypt-prod  # Disabled - certificates loaded from GCS to avoid rate limits
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # File upload support - allow up to 50MB for images and files
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/client-max-body-size: "50m"
+    # Buffer settings for file uploads (multipart/form-data)
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
     # WebSocket support for streaming chat responses
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "3600"
     nginx.ingress.kubernetes.io/websocket-services: "open-webui"
     # Enable sticky sessions for better WebSocket handling
     nginx.ingress.kubernetes.io/affinity: "cookie"
